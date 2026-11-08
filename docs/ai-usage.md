@@ -2,7 +2,7 @@
 
 Claude Code was the assistant for the design, the contract, the tests and the code, as the challenge allows. The design decisions were made by the developer, with the AI as an adviser that proposed options and checked claims against sources.
 
-After the last commit, Claude Code was also used to review the repository (`docs/testing-audit.md`). It wrote that report and the two test files `internal/httpapi/audit_test.go` and `internal/request/audit_test.go`. They were accepted because they test documented behaviour, add no dependency and pass `go vet` and the race detector. Its findings 2 and 3 were then fixed with Claude Code (G75, G76); findings 1, 4 and 5 were not fixed and are listed as known limitations in that report.
+After commit `0080892`, Claude Code was also used to review the repository (`docs/testing-audit.md`). It wrote that report and the two test files `internal/httpapi/audit_test.go` and `internal/request/audit_test.go`. They were accepted because they test documented behaviour, add no dependency and pass `go vet` and the race detector. Its findings 2 and 3 were then fixed with Claude Code (G75, G76); findings 1, 4 and 5 were not fixed and are listed as known limitations in that report.
 
 ## Developer replies
 
@@ -16,7 +16,7 @@ A second Claude Code session was used to clean up and standardise the developer'
 
 ## Prompts and sessions
 
-Edited copies of the Claude Code sessions, one set per phase. Personal identifiers are replaced with placeholders and the developer's instructions are lightly paraphrased, so they are not verbatim. Tool calls and results are left out. Raw system notifications are removed. The logs are the exported sessions of each phase, not necessarily every prompt. The last session, which fixed the audit findings (unknown-field logging, timestamp check) and cleaned up the documentation, is not included.
+Edited copies of the Claude Code sessions, one set per phase. Personal identifiers are replaced with placeholders and the developer's instructions are lightly paraphrased, so they are not verbatim. Tool calls and results are left out. Raw system notifications are removed. The logs are the exported sessions of each phase, not necessarily every prompt. Final fixes made after the logs were exported are not included.
 
 | Phase | Prompts | Session |
 |---|---|---|
