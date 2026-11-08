@@ -89,4 +89,4 @@ A sidecar (`geoipupdate`, every 24 hours) writes `GeoLite2-Country.mmdb` to a sh
 | Run, Docker, Kubernetes, secrets | [docs/deployment.md](docs/deployment.md) |
 | AI usage, time, test changes, session logs | [docs/ai-usage.md](docs/ai-usage.md) |
 
-Claude Code wrote most of the code under the developer's direction; the process, its gaps and the time spent (about 4h30, above the 4h suggested) are stated in `docs/ai-usage.md`. Code is MIT ([LICENSE](LICENSE)); `testdata/GeoIP2-Country-Test.mmdb` is MaxMind's synthetic test data (Apache-2.0 / MIT).
+Claude Code wrote most of the code under the developer's direction; the process, its gaps and the time spent (roughly 4.3 hours in this repository, estimated and not tracked, not counting the earlier design work) are stated in `docs/ai-usage.md`. Code is MIT ([LICENSE](LICENSE)); `testdata/GeoIP2-Country-Test.mmdb` is MaxMind's synthetic test data (Apache-2.0 / MIT).
