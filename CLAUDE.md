@@ -2,8 +2,8 @@
 
 Go service that answers one question: is this IP address inside one of the
 allowed countries? Used by the API gateway to restrict UI logins by country.
-The design is in `docs/design/` and `docs/api-design-notes.md`, and the
-contracts in `api/`. If code and design disagree, the design wins: stop and ask.
+The design is in `docs/design-notes.md`, and the
+contract in `api/openapi.yaml`. If code and design disagree, the design wins: stop and ask.
 
 ## The repo at a glance
 
@@ -57,11 +57,10 @@ NetworkPolicy, update sidecar, example Secret), `secrets/*.example`.
 | Need | File |
 |---|---|
 | Overview, workflows to run and verify | `README.md` |
-| Exact request/response/errors/headers | `docs/api.md`, `api/openapi.yaml`, `docs/problems.md` |
+| Exact request/response/errors/headers | `api/openapi.yaml` |
 | Run, Docker, Kubernetes, secrets | `docs/deployment.md` |
-| Why each decision, corner cases, known limitations (E) | `docs/api-design-notes.md` |
-| How each decision was settled (G items, question log) | `docs/decision-log.md` |
-| Design, edge cases (EC-xx), step order (S-xxx) | `docs/design/plan.md` |
+| Why each decision, known limitations (E11 to E13) | `docs/design-notes.md` |
+| Old long notes, plan (EC-xx, S-xxx), decision log (G items) | git history, commit `a93d637` |
 | AI usage and edited session logs | `docs/ai-usage.md`, `docs/ai-log/` |
 
 **Known limitations (do not "fix" without asking):** a database file damaged
@@ -84,7 +83,7 @@ in `README.md`, Workflows A and B.
 
 - Don't make things up. If something is unclear while coding, stop and ask me
   before going on. Discuss design and library choices with me first.
-- Do one plan step at a time, in the order of `docs/design/plan.md`.
+- Do one plan step at a time, in the order of the plan (`docs/design/plan.md` at commit `a93d637`).
 - Never change or delete an existing test to make it pass. If a test looks
   wrong, tell me.
 - Don't add features or files that the plan doesn't ask for.
@@ -131,7 +130,7 @@ in `README.md`, Workflows A and B.
 - Order for each step: skeleton, then failing tests, then the implementation,
   each as its own commit. The implementation commit does not change tests,
   unless the developer approves it and the reason is recorded in
-  `docs/decision-log.md`.
+  `docs/design-notes.md`.
 
 ## Before finishing any step
 
@@ -148,8 +147,8 @@ Report what passed and what didn't.
 - `GeoLite2-*.mmdb` is never committed (MaxMind licence). The service never
   downloads it and never touches the licence key: a separate update container
   (a sidecar) downloads it into a shared volume, and the service only reads
-  the file from there, checks it, and swaps it in (`docs/api-design-notes.md`,
-  D11 and J7).
+  the file from there, checks it, and swaps it in (`docs/design-notes.md`,
+  "Keeping the data fresh" and "Security").
 - The MaxMind account id and licence key are mounted as read-only files into
   the update container only: Docker Compose `secrets:` (at
   `/run/secrets/<name>`) and, in Kubernetes, a `Secret` used as files with

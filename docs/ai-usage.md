@@ -29,7 +29,7 @@ Other changes in `96dd759` only add tests. Fixing the code is in `1aa6a5a`.
 
 ## Review after the build
 
-After commit `0080892`, Claude Code was also used to review the repository. It wrote the two test files `internal/httpapi/audit_test.go` and `internal/request/audit_test.go`. They were accepted because they test documented behaviour, add no dependency and pass `go vet` and the race detector. Its findings 2 and 3 were fixed with Claude Code (G75, G76); three other findings were not fixed and are listed as known limitations (E11 to E13 in `docs/api-design-notes.md`).
+After commit `0080892`, Claude Code was also used to review the repository. It wrote the two test files `internal/httpapi/audit_test.go` and `internal/request/audit_test.go`. They were accepted because they test documented behaviour, add no dependency and pass `go vet` and the race detector. Its findings 2 and 3 were fixed with Claude Code (G75, G76); three other findings were not fixed and are listed as known limitations (E11 to E13 in `docs/design-notes.md`).
 
 ## Developer replies
 

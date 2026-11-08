@@ -7,8 +7,11 @@ info:
     identifier: MIT
   description: >
     Answers one question for the API gateway: is this IP address inside one of
-    the allowed countries? Source of truth for reasons and sources:
-    docs/api-design-notes.md. If this file and the notes disagree, the notes win.
+    the allowed countries? This file is the only place that lists every field,
+    text and example; reasons for the decisions are in docs/design-notes.md. If
+    they disagree, the notes win. Unknown paths get the standard library
+    `404 page not found` (`text/plain`), not a problem document. The request
+    body is limited to 16384 bytes and a request is abandoned after 10 seconds.
     Clients switch on `reason`, never parse `detail`, and ignore warning codes
     they do not know. Any 4xx or 5xx is the client's "error" state.
 servers:

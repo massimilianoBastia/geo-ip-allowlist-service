@@ -88,7 +88,7 @@ The service is configured only through environment variables. An unset or empty 
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` (any case). |
 | `SHUTDOWN_TIMEOUT` | `10s` | Time given to requests in flight after SIGTERM or SIGINT. Go duration, must be positive. |
 
-The fixed server timeouts are in [api.md](api.md#limits). Reasons for each default: [api-design-notes.md](api-design-notes.md), H1.
+The fixed server timeouts and the reasons for the defaults are in [design-notes.md](design-notes.md).
 
 ## Run on a laptop
 
