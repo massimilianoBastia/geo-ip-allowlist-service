@@ -33,4 +33,10 @@ func TestClassify(t *testing.T) {
 			})
 		}
 	}
+
+	t.Run("reserved/zero address", func(t *testing.T) {
+		if got := netclass.Classify(netip.Addr{}); got != netclass.CategoryReserved {
+			t.Errorf("Classify(zero address) = %q, want %q", got, netclass.CategoryReserved)
+		}
+	})
 }
