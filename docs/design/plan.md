@@ -1,8 +1,8 @@
 # Plan: geo-ip-allowlist-service
 
 > **APPROVED** by the developer (revision 3, after two grillz reviews). Steps are done one at a time, in the order below.
-> Approval scope: this plan and all proposed items G2 to G47 in `docs/api-design-notes.md`, as written there (source PLAN-APPROVAL in the notes appendix). Exception recorded at approval: the sanity-lookups setting must never make startup fail; if it is empty or unset the service logs a WARN and starts. G1, the ISO check date, was supplied by the developer later in the session and is recorded in G1 of the notes.
-> A = approved by the developer with a question ID. P = proposed by the designer and approved at plan approval (listed in notes section G).
+> Approval scope: this plan and all proposed items G2 to G47 in `docs/decision-log.md`, as written there (source PLAN-APPROVAL in its appendix). Exception recorded at approval: the sanity-lookups setting must never make startup fail; if it is empty or unset the service logs a WARN and starts. G1, the ISO check date, was supplied by the developer later in the session and is recorded in G1 of the notes.
+> A = approved by the developer with a question ID. P = proposed by the designer and approved at plan approval (listed in `docs/decision-log.md`, section G).
 
 ## Rephrased request
 
@@ -220,147 +220,30 @@ flowchart LR
 
 ## Steps
 
-Order: documents (S-001, S-002); core (S-004 to S-016, S-023, S-017); core deployment (S-018, S-020); optional (S-019, then S-022). Cut from the end: S-022 first, then S-019.
+Order: documents (S-001, S-002); core (S-004 to S-016, S-023, S-017); core deployment (S-018, S-020); optional (S-019, then S-022). Cut from the end: S-022 first, then S-019. S-003 (agent brief) was dropped (G74 in `docs/decision-log.md`).
 
-### S-001 Design notes: `docs/api-design-notes.md`
-Depends on: none. Sections A to K plus an appendix (decision log). Every item has an ID, status, reason, source. Test (manual review): sections A to K and the appendix exist; every A item cites an ID with an appendix entry; D11 and J7 have the stated meanings; G numbering has no gaps from G1 upwards and each item is listed once, and every item marked P anywhere in the notes has a G entry; performance numbers appear only in D7 (one run on the synthetic database, no threshold) and G2 only points to D7. (Content: see the notes file.)
+Each step is done in the order skeleton, failing tests, implementation (see `CLAUDE.md`). The expected values of each step are the tests in the repository and the edge cases above; the full per-step test text was removed from this plan once the steps were built.
 
-### S-002 Contract: `api/openapi.yaml` (OpenAPI 3.1)
-Depends on: S-001. Paths `POST /v1/ip-checks`, `/livez`, `/readyz`, `/version`, `/metrics` (optional). `warnings.code` open string. Problem schema, example per status. No `.proto`.
-Test (manual): only `post` on `/v1/ip-checks`; request `required: [ip_address, allowed_countries]`, `minItems: 1`; `session_id` and `requested_at` carry no hard type, `maxLength` or `format` constraint in the request schema (the service accepts bad values with a warning, so the schema must not reject them); the description says "at most 128 characters, UUID recommended; a longer or non-string value is ignored with a warning" and "RFC 3339; an invalid value is ignored with a warning"; response `required: [allowed, reason, detail, country]`, `reason` enum of exactly four values, `country` object or null; 400, 405, 413, 415, 422, 500, 503 use `application/problem+json`; 422 has `invalid_params` items `{pointer, reason}`; `/version` `{version (required), database_built_at (optional date-time)}`; `/readyz` 200 has `database_built_at`; no `/healthz`; example texts match notes A6-A9 exactly.
-
-### S-003 Agent brief (dropped)
-Dropped on 2026-11-08 (G74): `docs/agent-design-brief.md` repeated the notes and the contract and went out of date. The notes and `api/openapi.yaml` are the rules.
-
-### S-004 Module settings and `main` placeholder
-Depends on: S-002. Files: `go.mod`, `cmd/geoip-service/main.go`. Run `go mod edit -go=1.26 -toolchain=go1.26.10` (S-005's `go mod tidy` later raises the line to `go 1.26.0`, G53). Leave both requirements as they are (`maxminddb-golang/v2 v2.9.0 // indirect`, `golang.org/x/sys v0.49.0 // indirect`); no `go mod tidy` yet (nothing imports the library; P, G38). `main.go` is an empty `main`.
-Test (CLI): `go version` prints `go1.26.10 linux/amd64`; first four lines of `go.mod` are the module line, an empty line, `go 1.26`, `toolchain go1.26.10` (after S-005: `go 1.26.0`, G53); `go build ./...` exits 0; gate passes.
-
-### S-005 README check of the test database (test-only; `internal/geoipdb`)
-Depends on: S-004. Files: `internal/geoipdb/testdb_test.go` (shared helper), `internal/geoipdb/readme_test.go`, `testdata/README.md`. First import of the library: run `go mod tidy` here. Expected (P, G38): `maxminddb-golang/v2 v2.9.0` becomes direct, `golang.org/x/sys` stays `// indirect`. If any version changes, stop and ask. Without `-update` the test compares the block between `<!-- BEGIN GENERATED -->` and `<!-- END GENERATED -->` with the database; with `-update` it rewrites it. Existing source and licence text stays.
-Test (unit): DB type `GeoIP2-Country`; rows exactly:
-
-| Address | Network | Country | Name | Registered country |
-|---|---|---|---|---|
-| `81.2.69.160` | `81.2.69.160/27` | GB | United Kingdom | US |
-| `2.125.160.216` | `2.125.160.216/29` | GB | United Kingdom | FR |
-| `2001:218::1` | `2001:218::/32` | JP | Japan | JP |
-| `2a02:cf40::1` | `2a02:cf40::/29` | NO | Norway | NO |
-| `214.1.1.1` | `214.1.1.0/24` | (none) | | (none) |
-| `2a02:d500::1` | `2a02:d500::/29` | (none) | | (none) |
-| `5.83.124.1` | `5.83.124.0/22` | (none) | | RO |
-| `8.8.8.8` | not found | | | |
-
-Line "non-ISO country codes in database: 0" present. If the file disagrees, stop and ask.
-
-### S-006 Lookup benchmark (test-only; `internal/geoipdb`)
-Depends on: S-005. File `internal/geoipdb/bench_test.go`, reusing the helper. Four benchmarks: IPv4 hit `81.2.69.160`, IPv6 hit `2001:218::1`, miss `8.8.8.8`, parallel.
-Test (CLI): `go test ./internal/geoipdb -run='^$' -bench=. -benchmem` prints `ns/op`, `B/op`, `allocs/op` for all four. Record results in notes D7 (G2 only points to D7) with CPU, Go version and date, and say they come from one run on the synthetic database. No threshold; the benchmark code stays in the repository.
-
-### S-007 ISO list
-Depends on: S-004. Files `internal/iso/iso_test.go` (first), `internal/iso/iso.go`.
-Test (unit, reads no file): exactly 249 entries, each `^[A-Z]{2}$`, no duplicates; `GB`, `IT` present; `UK`, `XK` absent; membership `GB` true, `gb`/`UK`/`XK`/`USA`/`""` false.
-
-### S-008 Address parsing, classification, log guard
-Depends on: S-004. Files `internal/netclass/parse.go`, `classify.go`, `logaddr.go` and `_test.go`.
-Test (unit):
-- Parse: `::ffff:81.2.69.160` gives `81.2.69.160`; `2001:218::1` parses; `fe80::1%eth0` gives `fe80::1` (zone dropped, no error); `010.0.0.1`, ` 1.2.3.4`, `""`, `999.1.1.1` are errors.
-- Classify: `private`: `10.0.0.1`, `172.16.0.1`, `192.168.1.1`, `fd00::1`, `::ffff:10.0.0.1`. `loopback`: `127.0.0.1`, `::1`. `link_local`: `169.254.1.1`, `fe80::1`. `unspecified`: `0.0.0.0`, `::`. `reserved`: `224.0.0.1`, `ff02::1`, `100.64.0.1`, `192.0.2.1`, `198.51.100.1`, `203.0.113.1`, `2001:db8::1`, `240.0.0.1`, `255.255.255.255`, `0.1.2.3`, `198.18.0.1`, `192.0.0.1`. `public`: `81.2.69.160`, `8.8.8.8`, `2001:218::1`, `172.32.0.1`, `100.128.0.1`.
-- Guard type (prefix lengths A, strings P, G34): `81.2.69.160` -> `81.2.69.0/24`; `2001:218::1` -> `2001:218::/48`; `::ffff:81.2.69.160` -> `81.2.69.0/24`; `10.1.2.3` -> `10.1.2.0/24`; zero address -> `invalid`. A slog JSON record using it contains `"81.2.69.0/24"` and not `81.2.69.160`.
-
-### S-009 Request decoding
-Depends on: S-007, S-008. Files `internal/request/request.go`, `request_test.go`.
-Test (unit):
-- `{"ip_address":"81.2.69.160","allowed_countries":["gb","IT","GB"]}` -> valid, `[GB, IT]`, warning `{duplicate_country, /allowed_countries/2, "'GB' appears more than once in allowed_countries."}`.
-- `{}` -> `[{/ip_address,"ip_address is required."},{/allowed_countries,"allowed_countries is required."}]`. `{"ip_address":null,"allowed_countries":null}` -> same two items.
-- `{"ip_address":123,"allowed_countries":"GB"}` -> `[{/ip_address,"ip_address must be a string."},{/allowed_countries,"allowed_countries must be an array of strings."}]`.
-- Body `{"ip_address":"81.2.69.160","allowed_countries":[]}` -> exactly one item: `{/allowed_countries,"allowed_countries must contain at least one country code."}`. (Distinct from the body `[]`, which is not an object, see the last bullet.)
-- `ip_address` of `010.0.0.1`, ` 1.2.3.4`, `""`, `999.1.1.1` -> `{/ip_address,"ip_address must be a valid IPv4 or IPv6 address."}`. `fe80::1%eth0` -> valid, address `fe80::1`.
-- `[1,"GB",null]` -> `/allowed_countries/0` and `/2` "Each entry in allowed_countries must be a string."
-- `["USA","UK","1"," DE","ıt","XK"]` -> `/0` "'USA' is not an ISO 3166-1 alpha-2 country code.", then `/1` `'UK'`, `/2` `'1'`, `/3` `' DE'`, `/4` `'ıt'`, `/5` `'XK'`, same wording.
-- Bad IP plus `["USA"]` -> two items, `/ip_address` first. `::ffff:81.2.69.160` -> `81.2.69.160`. Misspelled `ip_adress` -> `/ip_address` missing, unknown `[ip_adress]`.
-- `session_id`: 128 x `é` kept; 129 runes -> `invalid_session_id` at `/session_id`, length 129; `42` -> warning, type `number`; `""` -> absent, no warning.
-- `requested_at`: `2026-11-08T10:00:00.5+01:00` kept; `yesterday` -> `invalid_requested_at`, length 9; `5` -> warning, type `number`.
-- Malformed (400): empty body, `not json`, `{"a":1} {}`. Not an object (422 at pointer `""`): `[]`, `null`, `"x"`, `42`.
-
-### S-010 Decision
-Depends on: S-007, S-008. Files `internal/decision/decision.go`, `decision_test.go`; parsed `netip.Addr` and a fake lookup.
-Test (unit):
-- `81.2.69.160`, `{GB}`, lookup GB/United Kingdom -> (true, `country_allowed`, `{GB, United Kingdom}`, allowed text). With `{DE}` -> `country_not_allowed` with the not-allowed text.
-- `10.0.0.1` -> (`country_unknown`, null, `private`, private text), lookup called 0 times. `127.0.0.1` -> `loopback`; `0.0.0.0` -> `unspecified`; `224.0.0.1` -> `reserved`; each with its text.
-- Not found -> `public_unmapped`; empty `iso_code` -> same. `XK`/Kosovo -> `country_unsupported` with `{XK, Kosovo}` and the unsupported text. A lookup error is returned wrapped.
-
-### S-011 Database adapter
-Depends on: S-006. Files `internal/geoipdb/geoipdb.go`, `geoipdb_test.go`, using the shared helper.
-Test (unit): opens test file, type `GeoIP2-Country`, non-zero build time. `81.2.69.160` GB/United Kingdom; `2001:218::1` JP/Japan; `2.125.160.216` GB; `214.1.1.1` found with `iso_code` `""`; `8.8.8.8` not found. Missing path gives `fs.ErrNotExist`; 100 zero bytes gives an error. Type check: `GeoLite2-Country`, `GeoIP2-Country` pass; `GeoLite2-City`, `GeoLite2-ASN`, `""` fail.
-
-### S-012 Reload
-Depends on: S-011. Files `internal/reload/reload.go`, `reload_test.go`. Fakes: stat (mtime), opener, ticker, logger; sanity pair `81.2.69.160=GB`.
-Test (unit, in sequence):
-0. The first load attempt runs at startup, before any tick, then again on every interval (P, G44). A valid file present at startup is loaded without waiting for a tick.
-1. File missing at that first attempt: not ready; one WARN "waiting for database file".
-2. mtime t1, build 2026-01-01, sanity GB: ready, `database_built_at` `2026-01-01T00:00:00Z`; INFO "database loaded".
-3. Same mtime: still exactly one open.
-4. Rejections, each keeps old data and logs one ERROR "database rejected" with cause: t2 opener fails (`open`); t3 type `GeoLite2-City` (`type`); t4 build 2025-12-01 (`not_newer`); t5 sanity returns DE (`sanity`).
-5. Same rejected mtime again: no new open, no new log.
-6. t6, build 2026-01-05: swapped.
-7. File removed after loading: old data kept; one ERROR.
-8. Empty sanity setting: exactly one WARN "sanity lookups are off"; `type` and `not_newer` rejections still happen; a valid newer file is swapped with zero sanity lookups.
-9. Cancelling the context stops the loop within 1 s.
-10. 50 goroutines doing lookups across 20 swaps under `-race`: 0 errors.
-
-### S-013 Settings
-Depends on: S-007, S-008. Files `internal/config/config.go`, `config_test.go`.
-Test (unit): empty environment gives the H1 defaults, zero sanity pairs, no error. `MAX_REQUEST_BODY_BYTES` of `0`, `-1`, `abc`, `1.5` gives an error naming the variable; `16384` ok. `DATABASE_POLL_INTERVAL` `0s`/`abc` error. `DATABASE_SANITY_CHECKS`: `81.2.69.160=GB,2001:218::1=JP` two pairs; `8.8.8.8`, `x=US`, `8.8.8.8=USA`, `8.8.8.8=XK` errors. `LOG_LEVEL=verbose` error. `PROBLEM_BASE_URL=/problems/` error. `SHUTDOWN_TIMEOUT=-1s` error.
-
-### S-014 Check handler and problems
-Depends on: S-009, S-010, S-012. Files `internal/httpapi/checks.go`, `problem.go`, `checks_test.go`, `problem_test.go`. Fakes and a captured slog handler at DEBUG.
-Test (unit, recorder):
-- `GET`: 405, `Allow: POST`, `type` `https://geo-service.example/problems/method-not-allowed`, title `Method not allowed`.
-- No Content-Type, `text/plain`, `application/xml`: 415. `application/json; charset=utf-8`: accepted.
-- 16,385 bytes: 413 with the exact detail. 16,384 bytes: 200.
-- `not json`: 400 "The request body is not valid JSON." `[]`: 422 pointer `""`. `{}`: 422 with the S-009 items. `allowed_countries: []`: 422.
-- Not ready: 503 `database-unavailable` for a valid request. Not ready and an invalid body (for example `{}`): 422 `invalid-request`, not 503 (notes A15). Decision error: 500 "An unexpected error occurred." plus ERROR log. Fake lookup `XK`: 200 `country_unsupported`, `{"iso_code":"XK","name":"Kosovo"}`.
-- `session_id "abc"`: echoed; every log line has `session_id=abc`. 129 runes: not in response, warning present, WARN log `session_id_length=129`.
-- Valid `requested_at`: summary log line has `requested_at="2026-11-08T10:00:00.5+01:00"`; response does not include it.
-- Unknown fields `foo`, `bar`: DEBUG `unknown_fields_count=2` only; no names, no values (G75). A field named like an address does not appear in any log line.
-- No warnings: no `warnings` key. `/nope`: 404 body `404 page not found`.
-- Every problem response has `Content-Type: application/problem+json`. No log line or response body contains `81.2.69.160`.
-
-### S-015 Operational endpoints
-Depends on: S-012. Files `internal/httpapi/ops.go`, `ops_test.go`; version `"1.2.3"`.
-Test (unit): `/livez` 200 `{"status":"ok"}` ready or not. `/readyz` ready, type `GeoLite2-Country`, build `2026-01-02T03:04:05Z`: 200 `{"status":"ready","database_type":"GeoLite2-Country","database_built_at":"2026-01-02T03:04:05Z"}`; not ready: 503 `database-unavailable`. `/version` ready: 200 `{"version":"1.2.3","database_built_at":"2026-01-02T03:04:05Z"}`; not ready: 200 `{"version":"1.2.3"}` without `database_built_at` (P). `POST` on any: 405 `Allow: GET, HEAD`. `HEAD /livez`: 200 empty body. `/healthz`: 404.
-
-### S-023 Recovery middleware
-Depends on: S-014. Files `internal/httpapi/recover.go`, `recover_test.go`.
-Test (unit): handler panics with `"boom secret"`: 500 `internal-error`, "An unexpected error occurred.", body has neither `boom` nor `goroutine`; one ERROR record with non-empty `stack`. Panic after `session_id "abc"` known: record has `session_id=abc`. Before known: no `session_id` key (A). Panic after headers written: connection aborted, ERROR logged (P). Next request gets 200.
-
-### S-016 Wiring and lifecycle
-Depends on: S-013, S-014, S-015, S-023. Files `cmd/geoip-service/main.go`, `main_test.go`.
-Signature (P, G36): `func run(ctx context.Context, getenv func(string) string, stdout io.Writer, d deps) error`; `deps` holds `listener net.Listener` (nil: listen on `LISTEN_ADDR`; tests pass an in-memory `net.Pipe`-based listener, so no socket is opened), `wrap func(http.Handler) http.Handler` (nil: none), `version string`. `main()` only sets up the signal context (SIGTERM, SIGINT), calls `run(ctx, os.Getenv, os.Stdout, deps{version: version})`, exits 1 on error. All testable logic lives in `internal/`.
-Test (unit, package `main`): `MAX_REQUEST_BODY_BYTES=abc` gives an error naming the variable and one ERROR line. Test DB plus `DATABASE_SANITY_CHECKS=81.2.69.160=GB,2001:218::1=JP`: `/readyz` 200 within 2 s (the test sets `DATABASE_POLL_INTERVAL=50ms`; the first attempt also runs at startup) and `/version` `database_built_at` equals the test DB build time. Missing path: `/readyz` 503, `/livez` 200, `/version` `{"version":"dev"}`. Graceful shutdown: `wrap` makes `/slow` block on a channel; cancel the context, release the channel: `/slow` returns 200 and `run` returns nil within `SHUTDOWN_TIMEOUT`. Manual: `kill -TERM` gives exit code 0.
-
-### S-017 Acceptance scenarios
-Depends on: S-016. Files `tests/scenarios/ip_checks_test.go`, `tests/scenarios/ops_test.go`; real `geoipdb`, `reload`, `httpapi` with `../../testdata/GeoIP2-Country-Test.mmdb` and sanity `81.2.69.160=GB`.
-Test (scenarios):
-- `81.2.69.160`, `["GB"]`: 200 `{"allowed":true,"reason":"country_allowed","country":{"iso_code":"GB","name":"United Kingdom"},"detail":"The IP address is located in GB (United Kingdom), which is in allowed_countries."}`.
-- `81.2.69.160`, `["de","FR"]`: `country_not_allowed`. `2001:218::1`, `["JP"]`: allowed. `2a02:cf40::1`, `["GB"]`: not allowed, NO/Norway. `::ffff:81.2.69.160`, `["GB"]`: allowed. `2.125.160.216`, `["FR"]`: not allowed, GB.
-- `8.8.8.8`, `214.1.1.1`, `2a02:d500::1`: `country_unknown`, `country` null, "No country is recorded for this IP address in the geolocation database, so it is blocked."
-- EC-18 to EC-22 addresses: their detail texts. `fe80::1%eth0`, `["GB"]`: 200 `country_unknown`, the loopback/link-local text. `["GB","gb","IT","IT"]`: allowed, two warnings. `[]`: 422. Bad IP plus `["USA"]`: 422 two items in order. Non-object body: 422. 16,384 / 16,385 bytes: 200 / 413.
-- Logs never contain a fixture IP. `ops_test.go`: `/readyz` 200 with `database_type` `GeoIP2-Country` and `database_built_at` equal to the file metadata; `/version` same value; `/livez` 200.
-
-### S-018 Dockerfile (core)
-Depends on: S-016. File `Dockerfile`. Build `golang:1.26`, `CGO_ENABLED=0`, `ARG VERSION=dev`, `-ldflags "-X main.version=${VERSION}"` (P, G37). Runtime `gcr.io/distroless/static-debian12:nonroot` (P, G26). No `.mmdb`, no credentials in the image.
-Test (container): `docker build --build-arg VERSION=0.1.0` succeeds; user `nonroot` (65532); no layer has a `*.mmdb`; `docker run`: `/livez` 200, `/readyz` 503, `/version` `{"version":"0.1.0"}`; with `-v $PWD/testdata:/usr/share/GeoIP:ro -e GEOIP_DATABASE_PATH=/usr/share/GeoIP/GeoIP2-Country-Test.mmdb -e DATABASE_SANITY_CHECKS=81.2.69.160=GB`: POST `{"ip_address":"81.2.69.160","allowed_countries":["GB"]}` gives 200 `"allowed":true` and `/version` includes `database_built_at`.
-
-### S-020 Kubernetes manifest (core)
-Depends on: S-018. File `deploy/kubernetes/geoip-service.yaml` (path P, G27). Deployment with 2 replicas. Service container: liveness `/livez`, readiness `/readyz`, read-only volume mount, `runAsNonRoot`, `readOnlyRootFilesystem`, all capabilities dropped, `DATABASE_SANITY_CHECKS` present but empty, with a comment showing the `ip=CC,ip=CC` format (no placeholder string; an empty value never stops startup, it logs one WARN; G35 as changed at approval). Sidecar: Secret mounted `readOnly: true` at `/run/secrets`, `_FILE` variables, `GEOIPUPDATE_EDITION_IDS=GeoLite2-Country`, `GEOIPUPDATE_FREQUENCY=24`, shared `emptyDir`, a second `emptyDir` at `/tmp` because the update image writes there, and `automountServiceAccountToken: false` so the token mount does not collide with `/run/secrets` (G73). ClusterIP Service 80 to 8080. NetworkPolicy with a placeholder gateway label. The Secret is not in this file: the example with placeholders is `deploy/kubernetes/secret.example.yaml` (G71), so applying the manifest can never overwrite a real Secret.
-Test (manual): `kubectl apply --dry-run=client -f deploy/kubernetes/` exits 0; probes are `/livez` and `/readyz`, no `/healthz`; the Secret is referenced only by geoipupdate and is not defined in the manifest; no credential in `env.value`; `DATABASE_SANITY_CHECKS` is present, empty and commented with the format.
-
-### S-019 `docker-compose.yml` (optional; cut second)
-Depends on: S-018. Files `docker-compose.yml`, `secrets/geoipupdate_account_id.example`, `secrets/geoipupdate_license_key.example`. Shared volume, read-only in the service; secrets from gitignored files; same empty, commented `DATABASE_SANITY_CHECKS` (G35).
-Test (manual): `docker compose config` shows secrets only on geoipupdate, `GEOIPUPDATE_ACCOUNT_ID_FILE=/run/secrets/geoipupdate_account_id`, no key value. No run with real credentials. A second file, `docker-compose.test.yml`, runs the service alone on `testdata/GeoIP2-Country-Test.mmdb` for a reviewer with no MaxMind account (G73).
-
-### S-022 `/metrics` (optional; cut first)
-Depends on: S-014, S-012. Files `internal/httpapi/metrics.go`, `metrics_test.go`.
-Test (unit): `GET /metrics` 200 `Content-Type: text/plain; version=0.0.4`; after one allowed check `ip_checks_total{reason="country_allowed"} 1`; after one 422 `http_problems_total{type="invalid-request"} 1`; build `2026-01-02T03:04:05Z` gives `database_build_timestamp_seconds 1767323045`; `POST` gives 405 `Allow: GET, HEAD`. If this step is cut, remove K4 from the notes first, then the contract.
+| Step | What | Depends on |
+|---|---|---|
+| S-001 | Design notes: `docs/api-design-notes.md` | none |
+| S-002 | Contract: `api/openapi.yaml` (OpenAPI 3.1) | S-001 |
+| S-004 | Module settings and `main` placeholder | S-002 |
+| S-005 | README check of the test database (test-only; `internal/geoipdb`) | S-004 |
+| S-006 | Lookup benchmark (test-only; `internal/geoipdb`) | S-005 |
+| S-007 | ISO list | S-004 |
+| S-008 | Address parsing, classification, log guard | S-004 |
+| S-009 | Request decoding | S-007, S-008 |
+| S-010 | Decision | S-007, S-008 |
+| S-011 | Database adapter | S-006 |
+| S-012 | Reload | S-011 |
+| S-013 | Settings | S-007, S-008 |
+| S-014 | Check handler and problems | S-009, S-010, S-012 |
+| S-015 | Operational endpoints | S-012 |
+| S-023 | Recovery middleware | S-014 |
+| S-016 | Wiring and lifecycle | S-013, S-014, S-015, S-023 |
+| S-017 | Acceptance scenarios | S-016 |
+| S-018 | Dockerfile (core) | S-016 |
+| S-020 | Kubernetes manifest (core) | S-018 |
+| S-019 | `docker-compose.yml` (optional; cut second) | S-018 |
+| S-022 | `/metrics` (optional; cut first) | S-014, S-012 |

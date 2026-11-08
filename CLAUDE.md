@@ -2,7 +2,83 @@
 
 Go service that answers one question: is this IP address inside one of the
 allowed countries? Used by the API gateway to restrict UI logins by country.
-The design is in `docs/design/` and the contracts in `api/`. If code and design disagree, the design wins: stop and ask.
+The design is in `docs/design/` and `docs/api-design-notes.md`, and the
+contracts in `api/`. If code and design disagree, the design wins: stop and ask.
+
+## The repo at a glance
+
+**Status:** built and tested (HTTP only). gRPC is designed, not built. VPN and
+proxy detection is out of scope. Go 1.26; the only third-party dependency is
+`github.com/oschwald/maxminddb-golang/v2` (plus `golang.org/x/sys`, indirect).
+
+**What it does:** `POST /v1/ip-checks` with `{ip_address, allowed_countries[],
+session_id?, requested_at?}` returns HTTP 200 with `{allowed, reason, detail,
+country, session_id?, warnings?}`. `reason` is one of `country_allowed`,
+`country_not_allowed`, `country_unknown`, `country_unsupported`. A blocked or
+unknown IP is still 200 (`allowed: false`). Any 4xx/5xx is an RFC 9457
+`application/problem+json` error. No country found means blocked (fail closed).
+
+**Other endpoints:** `GET`/`HEAD` `/livez`, `/readyz`, `/version`, `/metrics`
+(standard library, no Prometheus client).
+
+**Packages** (`cmd/` is wiring only; everything else is under `internal/`):
+
+| Package | Job |
+|---|---|
+| `cmd/geoip-service` | `main`: reads settings, builds and starts the parts, graceful shutdown |
+| `config` | Settings from environment variables, validated |
+| `iso` | The 249 assigned ISO 3166-1 alpha-2 codes |
+| `netclass` | Parse and classify an IP (private, loopback, reserved...), log guard type |
+| `request` | Decode and validate the request body, ordered `invalid_params`, warnings |
+| `decision` | The allow/deny decision from a country record and the allowed set |
+| `geoipdb` | Opens the `.mmdb` file and looks up a country; small `Database` interface |
+| `reload` | Polls the file's modification time, verifies and atomically swaps the database |
+| `httpapi` | Handlers, request pipeline, problem documents, recovery, ops endpoints, metrics |
+| `tests/scenarios` | Acceptance tests against the committed test database |
+
+**Settings (env vars, defaults in `internal/config/config.go`):** `LISTEN_ADDR`
+(`:8080`), `GEOIP_DATABASE_PATH`, `PROBLEM_BASE_URL`, `DATABASE_POLL_INTERVAL`
+(60s), `SHUTDOWN_TIMEOUT` (10s), `MAX_REQUEST_BODY_BYTES` (16384),
+`DATABASE_SANITY_CHECKS`, `LOG_LEVEL`.
+
+**Behaviour to remember:** the service starts without a database (checks and
+`/readyz` return 503 until one loads, `/livez` is 200); a bad or older file is
+rejected and the old data kept; the IP is never logged or echoed; unknown fields
+are ignored and only their count is logged; invalid optional fields give a
+warning, not an error; `allowed_countries` entries are upper-cased and checked
+against the ISO list (422 if not); an empty list is 422.
+
+**Deployment files:** `Dockerfile`, `docker-compose.yml` and
+`docker-compose.test.yml`, `deploy/kubernetes/` (Deployment, Service,
+NetworkPolicy, update sidecar, example Secret), `secrets/*.example`.
+
+**Where to read what (fast):**
+
+| Need | File |
+|---|---|
+| Overview, workflows to run and verify | `README.md` |
+| Exact request/response/errors/headers | `docs/api.md`, `api/openapi.yaml`, `docs/problems.md` |
+| Run, Docker, Kubernetes, secrets | `docs/deployment.md` |
+| Why each decision, corner cases, known limitations (E) | `docs/api-design-notes.md` |
+| How each decision was settled (G items, question log) | `docs/decision-log.md` |
+| Design, edge cases (EC-xx), step order (S-xxx) | `docs/design/plan.md` |
+| AI usage and edited session logs | `docs/ai-usage.md`, `docs/ai-log/` |
+
+**Known limitations (do not "fix" without asking):** a database file damaged
+inside with intact metadata is accepted (E11); `PROBLEM_BASE_URL` with a query
+or fragment gives odd problem types (E12); invalid UTF-8 in a JSON string is
+replaced, not rejected (E13); the stale-data policy is an open business question
+(BQ2); `XK` can never be allowed.
+
+**Quick commands:**
+
+```
+go build -o bin/geoip-service ./cmd/geoip-service
+GEOIP_DATABASE_PATH=testdata/GeoIP2-Country-Test.mmdb LISTEN_ADDR=127.0.0.1:8080 ./bin/geoip-service
+```
+
+The full verified steps (build, run, four sample calls, stop, Docker, kind) are
+in `README.md`, Workflows A and B.
 
 ## Working rules
 
@@ -55,7 +131,7 @@ The design is in `docs/design/` and the contracts in `api/`. If code and design 
 - Order for each step: skeleton, then failing tests, then the implementation,
   each as its own commit. The implementation commit does not change tests,
   unless the developer approves it and the reason is recorded in
-  `docs/ai-usage.md`.
+  `docs/decision-log.md`.
 
 ## Before finishing any step
 

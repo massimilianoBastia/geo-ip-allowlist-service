@@ -180,31 +180,7 @@ Response `200`:
 }
 ```
 
-A blocked IP is still `200`, with `allowed: false` and the cause in `reason` and `detail`. The same request with `"allowed_countries": ["DE"]` returns:
-
-```json
-{
-  "allowed": false,
-  "reason": "country_not_allowed",
-  "detail": "The IP address is located in GB (United Kingdom), which is not in allowed_countries, so it is blocked.",
-  "country": {
-    "iso_code": "GB",
-    "name": "United Kingdom"
-  },
-  "session_id": "3f1b5c9e-7a4d-4a64-9d2e-6d7a1f0c8b11"
-}
-```
-
-With a private address (`"ip_address": "10.0.0.1"`) no country can be found, so `country` is `null`:
-
-```json
-{
-  "allowed": false,
-  "reason": "country_unknown",
-  "detail": "The IP address is in a private range and has no associated country, so it is blocked.",
-  "country": null
-}
-```
+A blocked IP is still `200`, with `allowed: false` and the cause in `reason` and `detail`: the same request with `"allowed_countries": ["DE"]` gives `country_not_allowed`, and a private address such as `10.0.0.1` gives `country_unknown` with `"country": null`. Both bodies are in [docs/api.md](docs/api.md).
 
 Every 4xx and 5xx the service writes is an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `application/problem+json` document. For the gateway, any 4xx or 5xx means "error". The `type` is `PROBLEM_BASE_URL` (default `https://geo-service.example/problems/`) plus the name below.
 
@@ -218,28 +194,7 @@ Every 4xx and 5xx the service writes is an [RFC 9457](https://www.rfc-editor.org
 | 500 | `internal-error` | lookup error or panic; no internals in the body | cannot be triggered on purpose |
 | 503 | `database-unavailable` | valid check, or `/readyz`, while no database is loaded | start with a missing database file |
 
-All problem bodies have `type`, `title`, `status`, `detail`; only 422 adds `invalid_params`. The 422 example above answers:
-
-```json
-{
-  "type": "https://geo-service.example/problems/invalid-request",
-  "title": "Invalid request",
-  "status": 422,
-  "detail": "The request body is missing required fields or has invalid values.",
-  "invalid_params": [
-    {
-      "pointer": "/ip_address",
-      "reason": "ip_address must be a valid IPv4 or IPv6 address."
-    },
-    {
-      "pointer": "/allowed_countries/0",
-      "reason": "'USA' is not an ISO 3166-1 alpha-2 country code."
-    }
-  ]
-}
-```
-
-The exact body of every problem is in [docs/api.md](docs/api.md). Other endpoints: `GET /livez`, `GET /readyz`, `GET /version`, `GET /metrics`.
+All problem bodies have `type`, `title`, `status`, `detail`; only 422 adds `invalid_params` (a list of `{pointer, reason}`). The exact body of every problem is in [docs/api.md](docs/api.md). Other endpoints: `GET /livez`, `GET /readyz`, `GET /version`, `GET /metrics`.
 
 ## Quickstart
 
@@ -361,16 +316,13 @@ Short reasons; the full list with sources is in [docs/api-design-notes.md](docs/
 - **`XK` (Kosovo) can never be allowed.** The contract is ISO 3166-1 alpha-2 and `XK` is not in it.
 - **`POST` with a JSON body**, so the IP stays out of access-log URLs.
 - **An invalid country code is a 422, not ignored**, because silently dropping it would block that country's users with no trace.
-- **An IPv6 zone (`fe80::1%eth0`) is dropped, not rejected**; it names a local interface, not a country.
 - **The service starts without a database** and answers `503` until the first file arrives, so the sidecar has time to download it.
 - **A bad or older database file is rejected** and the old data kept, with an ERROR log.
-- **Plain HTTP inside the cluster**, limited by a NetworkPolicy to the gateway namespace. The IP the gateway sends is trusted.
-- **`/metrics` uses the standard library**, not the Prometheus client: it has three series and no new dependency. Switch only for histograms or runtime metrics (notes, G69).
 - **Very old data still answers.** Whether it should stop is an open business question (BQ2, [below](#open-questions-for-the-business-team)).
 
 ## Open questions for the business team
 
-Not blocking: the service works with the defaults below. Reasons and sources: [docs/api-design-notes.md](docs/api-design-notes.md), section G (BQ2, BQ3) and section E.
+Not blocking: the service works with the defaults below. Reasons and sources: [docs/decision-log.md](docs/decision-log.md) (BQ2, BQ3) and section E of [docs/api-design-notes.md](docs/api-design-notes.md).
 
 | ID | Question | Who can answer | Default today |
 |---|---|---|---|
@@ -385,7 +337,6 @@ What the gateway needs to know. The full contract is [docs/api.md](docs/api.md) 
 
 - **Three states.** `200` with `allowed: true`: let the user in. `200` with `allowed: false`: block. Any `4xx` or `5xx`: "error".
 - **Switch on `reason`, never parse `detail`.** The four values are in [the API specification](#api-specification). Ignore `warnings` codes you do not know.
-- **A warning is a hint, not a failure.** It tells you a part of the request was not used (for example a duplicate country); the decision is still valid.
 - **Send the real client address as `ip_address`.** The service trusts it. A private, loopback or reserved address is answered `country_unknown` and blocked, so send the address of the user, not of a proxy.
 - **`session_id`** (a UUID is recommended; any string of at most 128 characters is accepted) is echoed back and written to every log line of the request, so you can correlate. It is optional.
 - **`503` means "retry later".** It happens until the first database file is loaded. `/readyz` is `200` when the service can answer.
@@ -403,6 +354,7 @@ Open for the gateway team (not defined by this service):
 - **Designed only:** gRPC (design in the notes, section F2), VPN and proxy detection (not planned; known limitation).
 - **Run:** `docker-compose.test.yml`, and `docker-compose.yml` with a real MaxMind account (the real GeoLite2 file was downloaded and answered), both with Docker Compose v5.6.0 against Podman's socket.
 - **Run on a local cluster:** the Kubernetes manifest on `kind`, with a placeholder Secret and with a real one (real download, sanity check pass and fail, `kubectl port-forward` checks, NetworkPolicy enforced). See [docs/deployment.md](docs/deployment.md#run-on-kubernetes).
+- **Known limitation:** a database file damaged inside, with its metadata intact, is not detected when it is loaded: `/readyz` returns 200 and checks return 500 (never a wrong "allowed"). See E11 in [the notes](docs/api-design-notes.md).
 - **Not tested:** the unit tests never use the real GeoLite2 file (by design); the daily update after the first download; clusters other than `kind`; plain `docker` (everything was run with Podman).
 
 ## Use of AI
@@ -416,12 +368,20 @@ Claude Code was used under the developer's direction. See [docs/ai-usage.md](doc
 - The real `GeoLite2-Country.mmdb` is under MaxMind's GeoLite2 licence. It is **never committed** and the service never downloads it. Only the update container does, with your own MaxMind account.
 - MaxMind credentials are only ever read-only mounted files in the update container: never environment values, never in the image, never in the repository. Only `secrets/*.example` placeholders are committed.
 
-## Where to find what
+## Want to know more?
 
-| Topic | Authority |
+| Topic | File |
 |---|---|
-| Decisions and reasons | [docs/api-design-notes.md](docs/api-design-notes.md) |
+| API detail | [docs/api.md](docs/api.md) |
 | Machine-readable contract | [api/openapi.yaml](api/openapi.yaml) |
 | Problem types | [docs/problems.md](docs/problems.md) |
-| API detail | [docs/api.md](docs/api.md) |
 | Running and deploying | [docs/deployment.md](docs/deployment.md) |
+
+### Want to know the reasons and the decision process?
+
+| Topic | File |
+|---|---|
+| Decisions, corner cases, known limitations | [docs/api-design-notes.md](docs/api-design-notes.md) |
+| How each decision was settled | [docs/decision-log.md](docs/decision-log.md) |
+| Plan and test steps | [docs/design/plan.md](docs/design/plan.md) |
+| AI usage and session logs | [docs/ai-usage.md](docs/ai-usage.md) |
