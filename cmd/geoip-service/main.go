@@ -59,10 +59,12 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer, d de
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	reloader := reload.New(cfg.DatabasePath, cfg.SanityChecks, reload.FileStat{}, reload.FileOpener{}, logger)
 	var background sync.WaitGroup
-	defer background.Wait()
+	defer func() {
+		cancel()
+		background.Wait()
+	}()
 	background.Add(1)
 	go func() {
 		defer background.Done()

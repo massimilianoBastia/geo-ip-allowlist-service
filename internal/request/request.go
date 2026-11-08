@@ -2,10 +2,12 @@
 package request
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
+	"regexp"
 	"slices"
 	"sort"
 	"time"
@@ -76,7 +78,9 @@ func Parse(body []byte) (Request, error) {
 		return Request{}, ErrMalformed
 	}
 	var value any
-	if err := json.Unmarshal(body, &value); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
 		return Request{}, fmt.Errorf("decode request body: %w", err)
 	}
 	fields, ok := value.(map[string]any)
@@ -189,6 +193,19 @@ func (r *Request) parseSessionID(v any, fields map[string]any) {
 	r.ignore(fieldSession, v, "session_id must be a string of at most 128 characters; the value was ignored.")
 }
 
+// rfc3339Shape is the RFC 3339 section 5.6 profile: two-digit fields and a
+// numeric offset of at most 23:59. Go's parser alone is more lenient.
+var rfc3339Shape = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]([01]\d|2[0-3]):[0-5]\d)$`)
+
+// isRFC3339 reports whether s has the RFC 3339 shape and is a real date and time.
+func isRFC3339(s string) bool {
+	if !rfc3339Shape.MatchString(s) {
+		return false
+	}
+	_, err := time.Parse(time.RFC3339, s)
+	return err == nil
+}
+
 // parseRequestedAt keeps a valid RFC 3339 timestamp; anything else is ignored
 // with a warning.
 func (r *Request) parseRequestedAt(v any, fields map[string]any) {
@@ -196,7 +213,7 @@ func (r *Request) parseRequestedAt(v any, fields map[string]any) {
 		return
 	}
 	if s, ok := v.(string); ok {
-		if _, err := time.Parse(time.RFC3339, s); err == nil {
+		if isRFC3339(s) {
 			r.RequestedAt = s
 			return
 		}
@@ -221,7 +238,7 @@ func jsonType(v any) string {
 		return "null"
 	case bool:
 		return "boolean"
-	case float64:
+	case json.Number:
 		return "number"
 	case []any:
 		return "array"

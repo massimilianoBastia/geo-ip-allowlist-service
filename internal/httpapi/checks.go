@@ -13,10 +13,7 @@ import (
 	"github.com/massimilianoBastia/geo-ip-allowlist-service/internal/request"
 )
 
-const (
-	maxLoggedUnknownFields = 20
-	detailDatabaseMissing  = "The geolocation database is not loaded yet; retry later."
-)
+const detailDatabaseMissing = "The geolocation database is not loaded yet; retry later."
 
 // checks handles POST /v1/ip-checks.
 type checks struct {
@@ -187,8 +184,9 @@ func (c *checks) log(r *http.Request, start time.Time, out outcome) {
 	logger.LogAttrs(ctx, level, "request handled", attrs...)
 }
 
-// logIgnored logs the optional fields that were ignored (WARN) and the names
-// of unknown fields (DEBUG), never their values.
+// logIgnored logs the optional fields that were ignored (WARN) and the number
+// of unknown fields (DEBUG). Unknown field names are caller-controlled, so
+// neither names nor values are logged.
 func logIgnored(logger *slog.Logger, req *request.Request) {
 	for _, f := range req.Ignored {
 		if f.JSONType != "" {
@@ -198,7 +196,6 @@ func logIgnored(logger *slog.Logger, req *request.Request) {
 		}
 	}
 	if n := len(req.UnknownFields); n > 0 {
-		names := req.UnknownFields[:min(n, maxLoggedUnknownFields)]
-		logger.Debug("unknown fields ignored", "unknown_fields", names, "unknown_fields_count", n)
+		logger.Debug("unknown fields ignored", "unknown_fields_count", n)
 	}
 }
