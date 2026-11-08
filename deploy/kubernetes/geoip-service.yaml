@@ -1,0 +1,153 @@
+# geo-ip-allowlist-service: the service plus the MaxMind update sidecar.
+#
+# The sidecar (official geoipupdate image) downloads GeoLite2-Country.mmdb into
+# a shared emptyDir. The service mounts it read-only, polls it and swaps it in.
+# The MaxMind credentials are in a Secret named maxmind-credentials, mounted as
+# read-only files into the sidecar only, and read through the *_FILE variables.
+# The Secret is NOT in this file, so applying this file can never overwrite a
+# real Secret. Create it first: see deploy/kubernetes/secret.example.yaml and
+# docs/deployment.md.
+#
+# Apply into the namespace of your choice: kubectl apply -n <namespace> -f ...
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: geoip-service
+  labels:
+    app: geoip-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: geoip-service
+  template:
+    metadata:
+      labels:
+        app: geoip-service
+    spec:
+      # The service never calls the Kubernetes API. The token would also be
+      # mounted under /var/run/secrets (= /run/secrets), inside the read-only
+      # Secret mount of the sidecar, and the sidecar would not start.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: geoip-service
+          # Build with the Dockerfile, push to your registry, change the name.
+          image: geo-ip-allowlist-service:0.1.0
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: GEOIP_DATABASE_PATH
+              value: /usr/share/GeoIP/GeoLite2-Country.mmdb
+            # Known "ip=CC" pairs checked on every database load, for example
+            # "81.2.69.160=GB,2001:218::1=JP". The developer supplies pairs that
+            # are true for the real GeoLite2 file. Empty means no sanity check:
+            # the service logs one WARN and still starts.
+            - name: DATABASE_SANITY_CHECKS
+              value: ""
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: geoip-data
+              mountPath: /usr/share/GeoIP
+              readOnly: true
+        - name: geoipupdate
+          image: ghcr.io/maxmind/geoipupdate:v7.1.0
+          env:
+            - name: GEOIPUPDATE_ACCOUNT_ID_FILE
+              value: /run/secrets/account_id
+            - name: GEOIPUPDATE_LICENSE_KEY_FILE
+              value: /run/secrets/license_key
+            - name: GEOIPUPDATE_EDITION_IDS
+              value: GeoLite2-Country
+            # Hours between updates.
+            - name: GEOIPUPDATE_FREQUENCY
+              value: "24"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: geoip-data
+              mountPath: /usr/share/GeoIP
+            - name: maxmind-credentials
+              mountPath: /run/secrets
+              readOnly: true
+            # The update image writes a health file under /tmp at start.
+            - name: update-tmp
+              mountPath: /tmp
+      volumes:
+        - name: geoip-data
+          emptyDir: {}
+        - name: maxmind-credentials
+          secret:
+            secretName: maxmind-credentials
+        - name: update-tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: geoip-service
+  labels:
+    app: geoip-service
+spec:
+  type: ClusterIP
+  selector:
+    app: geoip-service
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# Plain HTTP inside the cluster: only the gateway namespace may reach the service.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: geoip-service-from-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app: geoip-service
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              # Placeholder: the label of the API gateway namespace.
+              kubernetes.io/metadata.name: api-gateway
+      ports:
+        - port: 8080

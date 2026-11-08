@@ -13,6 +13,7 @@ in `api/`. If code and design disagree, the design wins: stop and ask.
 - Never change or delete an existing test to make it pass. If a test looks
   wrong, tell me.
 - Don't add features or files that the plan doesn't ask for.
+- If you test the component follow strictly the workflow defined in the READM.md either by building the binary or by installing the local cluster
 
 ## Go style
 

@@ -1,0 +1,23 @@
+# Local run without MaxMind credentials: the service reads the synthetic test
+# database in testdata/. No update container, no secrets.
+#
+#   docker compose -f docker-compose.test.yml up --build
+#
+# For the real GeoLite2 database (needs your own MaxMind licence key), use
+# docker-compose.yml instead.
+services:
+  geoip-service:
+    build:
+      context: .
+      args:
+        VERSION: dev
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      GEOIP_DATABASE_PATH: /data/GeoIP2-Country-Test.mmdb
+    volumes:
+      - ./testdata:/data:ro,z
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true

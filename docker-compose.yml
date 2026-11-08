@@ -1,0 +1,54 @@
+# Local run with the real database: the service plus the MaxMind update
+# container. This needs your own MaxMind licence key. Without one, use
+# docker-compose.test.yml (the synthetic test database).
+#
+# 1. Copy secrets/*.example to secrets/geoipupdate_account_id and
+#    secrets/geoipupdate_license_key (without ".example") and put your MaxMind
+#    account id and licence key inside. These files are not committed.
+# 2. docker compose up --build
+#
+# The credentials are mounted as read-only files into geoipupdate only, at
+# /run/secrets/<name>. The *_FILE variables hold those paths, not the secrets.
+services:
+  geoip-service:
+    build:
+      context: .
+      args:
+        VERSION: dev
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      GEOIP_DATABASE_PATH: /usr/share/GeoIP/GeoLite2-Country.mmdb
+      # Known "ip=CC" pairs checked on every database load, for example
+      # "81.2.69.160=GB,2001:218::1=JP". Supply pairs that are true for the real
+      # GeoLite2 file. Empty means no sanity check: one WARN, the service starts.
+      DATABASE_SANITY_CHECKS: ""
+    volumes:
+      - geoip-data:/usr/share/GeoIP:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+  geoipupdate:
+    image: ghcr.io/maxmind/geoipupdate:v7.1.0
+    environment:
+      GEOIPUPDATE_ACCOUNT_ID_FILE: /run/secrets/geoipupdate_account_id
+      GEOIPUPDATE_LICENSE_KEY_FILE: /run/secrets/geoipupdate_license_key
+      GEOIPUPDATE_EDITION_IDS: GeoLite2-Country
+      # Hours between updates.
+      GEOIPUPDATE_FREQUENCY: "24"
+    volumes:
+      - geoip-data:/usr/share/GeoIP
+    secrets:
+      - geoipupdate_account_id
+      - geoipupdate_license_key
+
+volumes:
+  geoip-data:
+
+secrets:
+  geoipupdate_account_id:
+    file: ./secrets/geoipupdate_account_id
+  geoipupdate_license_key:
+    file: ./secrets/geoipupdate_license_key

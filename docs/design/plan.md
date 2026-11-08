@@ -46,7 +46,8 @@ internal/httpapi/                handlers, RFC 9457 problems, /livez /readyz /ve
 tests/scenarios/                 acceptance scenarios with testdata/GeoIP2-Country-Test.mmdb (existing directory)
 api/openapi.yaml                 contract
 deploy/kubernetes/geoip-service.yaml   manifest (path P)
-Dockerfile, docker-compose.yml, secrets/*.example
+deploy/kubernetes/secret.example.yaml  example Secret, placeholders only, never applied (G71)
+Dockerfile, docker-compose.yml, docker-compose.test.yml, secrets/*.example, README.md, LICENSE, docs/api.md, docs/deployment.md
 ```
 
 Unit tests sit next to their code. Scenario tests live only in `tests/scenarios/`; they assemble the real `geoipdb`, `reload` and `httpapi` around the test database (importing `internal/` from `tests/` is allowed, both are inside the module root).
@@ -354,12 +355,12 @@ Depends on: S-016. File `Dockerfile`. Build `golang:1.26`, `CGO_ENABLED=0`, `ARG
 Test (container): `docker build --build-arg VERSION=0.1.0` succeeds; user `nonroot` (65532); no layer has a `*.mmdb`; `docker run`: `/livez` 200, `/readyz` 503, `/version` `{"version":"0.1.0"}`; with `-v $PWD/testdata:/usr/share/GeoIP:ro -e GEOIP_DATABASE_PATH=/usr/share/GeoIP/GeoIP2-Country-Test.mmdb -e DATABASE_SANITY_CHECKS=81.2.69.160=GB`: POST `{"ip_address":"81.2.69.160","allowed_countries":["GB"]}` gives 200 `"allowed":true` and `/version` includes `database_built_at`.
 
 ### S-020 Kubernetes manifest (core)
-Depends on: S-018. File `deploy/kubernetes/geoip-service.yaml` (path P, G27). Deployment with 2 replicas. Service container: liveness `/livez`, readiness `/readyz`, read-only volume mount, `runAsNonRoot`, `readOnlyRootFilesystem`, all capabilities dropped, `DATABASE_SANITY_CHECKS` present but empty, with a comment showing the `ip=CC,ip=CC` format (no placeholder string; an empty value never stops startup, it logs one WARN; G35 as changed at approval). Sidecar: Secret mounted `readOnly: true` at `/run/secrets`, `_FILE` variables, `GEOIPUPDATE_EDITION_IDS=GeoLite2-Country`, `GEOIPUPDATE_FREQUENCY=24`, shared `emptyDir`. ClusterIP Service 80 to 8080. NetworkPolicy with a placeholder gateway label. Example Secret with placeholders only.
-Test (manual): `kubectl apply --dry-run=client -f deploy/kubernetes/` exits 0; probes are `/livez` and `/readyz`, no `/healthz`; the Secret is referenced only by geoipupdate; no credential in `env.value`; `DATABASE_SANITY_CHECKS` is present, empty and commented with the format.
+Depends on: S-018. File `deploy/kubernetes/geoip-service.yaml` (path P, G27). Deployment with 2 replicas. Service container: liveness `/livez`, readiness `/readyz`, read-only volume mount, `runAsNonRoot`, `readOnlyRootFilesystem`, all capabilities dropped, `DATABASE_SANITY_CHECKS` present but empty, with a comment showing the `ip=CC,ip=CC` format (no placeholder string; an empty value never stops startup, it logs one WARN; G35 as changed at approval). Sidecar: Secret mounted `readOnly: true` at `/run/secrets`, `_FILE` variables, `GEOIPUPDATE_EDITION_IDS=GeoLite2-Country`, `GEOIPUPDATE_FREQUENCY=24`, shared `emptyDir`, a second `emptyDir` at `/tmp` because the update image writes there, and `automountServiceAccountToken: false` so the token mount does not collide with `/run/secrets` (G73). ClusterIP Service 80 to 8080. NetworkPolicy with a placeholder gateway label. The Secret is not in this file: the example with placeholders is `deploy/kubernetes/secret.example.yaml` (G71), so applying the manifest can never overwrite a real Secret.
+Test (manual): `kubectl apply --dry-run=client -f deploy/kubernetes/` exits 0; probes are `/livez` and `/readyz`, no `/healthz`; the Secret is referenced only by geoipupdate and is not defined in the manifest; no credential in `env.value`; `DATABASE_SANITY_CHECKS` is present, empty and commented with the format.
 
 ### S-019 `docker-compose.yml` (optional; cut second)
 Depends on: S-018. Files `docker-compose.yml`, `secrets/geoipupdate_account_id.example`, `secrets/geoipupdate_license_key.example`. Shared volume, read-only in the service; secrets from gitignored files; same empty, commented `DATABASE_SANITY_CHECKS` (G35).
-Test (manual): `docker compose config` shows secrets only on geoipupdate, `GEOIPUPDATE_ACCOUNT_ID_FILE=/run/secrets/geoipupdate_account_id`, no key value. No run with real credentials.
+Test (manual): `docker compose config` shows secrets only on geoipupdate, `GEOIPUPDATE_ACCOUNT_ID_FILE=/run/secrets/geoipupdate_account_id`, no key value. No run with real credentials. A second file, `docker-compose.test.yml`, runs the service alone on `testdata/GeoIP2-Country-Test.mmdb` for a reviewer with no MaxMind account (G73).
 
 ### S-022 `/metrics` (optional; cut first)
 Depends on: S-014, S-012. Files `internal/httpapi/metrics.go`, `metrics_test.go`.
