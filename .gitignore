@@ -1,0 +1,28 @@
+# MaxMind GeoLite2 databases must not be committed: the GeoLite licence requires
+# keeping them up to date and has its own redistribution rules. The synthetic
+# test database in testdata/ is allowed.
+*.mmdb
+!testdata/*.mmdb
+GeoLite2*.tar.gz
+GeoLite2*.zip
+GeoIP.conf
+
+# Secrets and local config: only *.example placeholders are committed
+.env
+*.key
+secrets/*
+!secrets/*.example
+
+# Build output
+/bin/
+*.test
+*.out
+coverage.*
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+
+#AI Dump
+docs/ai-log

@@ -1,0 +1,464 @@
+openapi: 3.1.0
+info:
+  title: geo-ip-allowlist-service
+  version: 1.0.0
+  license:
+    name: MIT
+    identifier: MIT
+  description: >
+    Answers one question for the API gateway: is this IP address inside one of
+    the allowed countries? Source of truth for reasons and sources:
+    docs/api-design-notes.md. If this file and the notes disagree, the notes win.
+    Clients switch on `reason`, never parse `detail`, and ignore warning codes
+    they do not know. Any 4xx or 5xx is the client's "error" state.
+servers:
+  - url: http://geoip-service
+    description: In-cluster address (placeholder)
+security: []
+paths:
+  /v1/ip-checks:
+    post:
+      operationId: createIpCheck
+      summary: Check whether an IP address is in one of the allowed countries
+      description: >
+        Returns 200 whenever the check completes, also when the result is "not
+        allowed". The IP is never echoed in the response and never logged.
+        Checks run in this order and each stops at the first failure: method
+        (405), Content-Type (415), body size (413), JSON syntax (400). Field
+        validation then returns one 422 listing every problem. The database
+        lookup comes after validation, so an invalid request gets 422 even when
+        no database is loaded; 503 applies only to a valid request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IpCheckRequest'
+            examples:
+              allowed:
+                value:
+                  ip_address: 81.2.69.160
+                  allowed_countries: [GB]
+                  session_id: 3f1b5c9e-7a4d-4a64-9d2e-6d7a1f0c8b11
+      responses:
+        '200':
+          description: The check completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IpCheckResponse'
+              examples:
+                allowed:
+                  value:
+                    allowed: true
+                    reason: country_allowed
+                    detail: The IP address is located in GB (United Kingdom), which is in allowed_countries.
+                    country:
+                      iso_code: GB
+                      name: United Kingdom
+                notAllowed:
+                  value:
+                    allowed: false
+                    reason: country_not_allowed
+                    detail: The IP address is located in GB (United Kingdom), which is not in allowed_countries, so it is blocked.
+                    country:
+                      iso_code: GB
+                      name: United Kingdom
+                unknownPrivate:
+                  value:
+                    allowed: false
+                    reason: country_unknown
+                    detail: The IP address is in a private range and has no associated country, so it is blocked.
+                    country: null
+                unknownNoRecord:
+                  value:
+                    allowed: false
+                    reason: country_unknown
+                    detail: No country is recorded for this IP address in the geolocation database, so it is blocked.
+                    country: null
+                unsupported:
+                  value:
+                    allowed: false
+                    reason: country_unsupported
+                    detail: The IP address is located in a country whose code is not an ISO 3166-1 alpha-2 code, so it cannot be in any allowed list and is blocked.
+                    country:
+                      iso_code: XK
+                      name: Kosovo
+                withWarnings:
+                  value:
+                    allowed: true
+                    reason: country_allowed
+                    detail: The IP address is located in GB (United Kingdom), which is in allowed_countries.
+                    country:
+                      iso_code: GB
+                      name: United Kingdom
+                    warnings:
+                      - code: duplicate_country
+                        detail: "'IT' appears more than once in allowed_countries."
+                        pointer: /allowed_countries/2
+        '400':
+          description: The body is not valid JSON.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: https://geo-service.example/problems/malformed-request
+                title: Malformed request
+                status: 400
+                detail: The request body is not valid JSON.
+        '405':
+          description: Method other than POST.
+          headers:
+            Allow:
+              schema:
+                type: string
+                const: POST
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: https://geo-service.example/problems/method-not-allowed
+                title: Method not allowed
+                status: 405
+                detail: This resource only supports POST.
+        '413':
+          description: The body is larger than the configured cap (default 16384 bytes).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: https://geo-service.example/problems/request-too-large
+                title: Request too large
+                status: 413
+                detail: The request body exceeds the maximum allowed size of 16384 bytes.
+        '415':
+          description: Content-Type is not application/json.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: https://geo-service.example/problems/unsupported-media-type
+                title: Unsupported media type
+                status: 415
+                detail: The request Content-Type must be application/json.
+        '422':
+          description: >
+            The JSON is not an object, or required fields are missing or
+            invalid, or allowed_countries is empty. Every problem is listed,
+            ip_address first, then allowed_countries by ascending index.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/InvalidRequestProblem'
+              example:
+                type: https://geo-service.example/problems/invalid-request
+                title: Invalid request
+                status: 422
+                detail: The request body is missing required fields or has invalid values.
+                invalid_params:
+                  - pointer: /ip_address
+                    reason: ip_address must be a valid IPv4 or IPv6 address.
+                  - pointer: /allowed_countries/0
+                    reason: "'USA' is not an ISO 3166-1 alpha-2 country code."
+        '500':
+          description: Unexpected failure or panic. No internals in the body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: https://geo-service.example/problems/internal-error
+                title: Internal error
+                status: 500
+                detail: An unexpected error occurred.
+        '503':
+          description: >
+            No geolocation database is loaded yet. Returned only for a valid
+            request; an invalid request gets 422 first.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: https://geo-service.example/problems/database-unavailable
+                title: Service unavailable
+                status: 503
+                detail: The geolocation database is not loaded yet; retry later.
+  /livez:
+    get:
+      operationId: getLiveness
+      summary: Liveness. Always 200 while the process runs.
+      responses:
+        '200':
+          description: Alive.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: ok
+              example:
+                status: ok
+        '405':
+          $ref: '#/components/responses/OpsMethodNotAllowed'
+    head:
+      operationId: headLiveness
+      summary: Liveness without a body.
+      responses:
+        '200':
+          description: Alive.
+  /readyz:
+    get:
+      operationId: getReadiness
+      summary: Readiness. 200 only when a database is loaded.
+      responses:
+        '200':
+          description: Ready.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, database_type, database_built_at]
+                properties:
+                  status:
+                    type: string
+                    const: ready
+                  database_type:
+                    type: string
+                    description: Type of the loaded database, for example GeoLite2-Country.
+                  database_built_at:
+                    type: string
+                    format: date-time
+                    description: RFC 3339 build date of the loaded database.
+              example:
+                status: ready
+                database_type: GeoLite2-Country
+                database_built_at: '2026-01-02T03:04:05Z'
+        '405':
+          $ref: '#/components/responses/OpsMethodNotAllowed'
+        '503':
+          description: No database loaded yet.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: https://geo-service.example/problems/database-unavailable
+                title: Service unavailable
+                status: 503
+                detail: The geolocation database is not loaded yet; retry later.
+    head:
+      operationId: headReadiness
+      summary: Readiness without a body.
+      responses:
+        '200':
+          description: Ready.
+        '503':
+          description: No database loaded yet.
+  /version:
+    get:
+      operationId: getVersion
+      summary: Service version and build date of the loaded database.
+      responses:
+        '200':
+          description: >
+            `database_built_at` is omitted while no database is loaded.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version]
+                properties:
+                  version:
+                    type: string
+                    description: Service version injected at build time.
+                  database_built_at:
+                    type: string
+                    format: date-time
+                    description: RFC 3339 build date of the loaded database.
+              example:
+                version: 1.2.3
+                database_built_at: '2026-01-02T03:04:05Z'
+        '405':
+          $ref: '#/components/responses/OpsMethodNotAllowed'
+    head:
+      operationId: headVersion
+      summary: Version without a body.
+      responses:
+        '200':
+          description: OK.
+  /metrics:
+    get:
+      operationId: getMetrics
+      summary: Prometheus text format. Optional; cut first if time runs short.
+      description: >
+        Series: ip_checks_total{reason}, http_problems_total{type},
+        database_build_timestamp_seconds.
+      responses:
+        '200':
+          description: Metrics in Prometheus text format 0.0.4.
+          content:
+            text/plain; version=0.0.4:
+              schema:
+                type: string
+        '405':
+          $ref: '#/components/responses/OpsMethodNotAllowed'
+    head:
+      operationId: headMetrics
+      summary: Metrics without a body.
+      responses:
+        '200':
+          description: OK.
+components:
+  responses:
+    OpsMethodNotAllowed:
+      description: Method other than GET or HEAD on an operational endpoint.
+      headers:
+        Allow:
+          schema:
+            type: string
+            const: GET, HEAD
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: https://geo-service.example/problems/method-not-allowed
+            title: Method not allowed
+            status: 405
+            detail: This resource only supports GET and HEAD.
+  schemas:
+    IpCheckRequest:
+      type: object
+      required: [ip_address, allowed_countries]
+      description: >
+        Unknown fields are ignored. A misspelled required field counts as
+        missing. session_id and requested_at are decoded leniently: a bad value
+        is ignored and produces a warning.
+      properties:
+        ip_address:
+          type: string
+          description: >
+            IPv4 or IPv6 text address, parsed with Go's net/netip. Anything
+            netip.ParseAddr rejects (for example a leading zero, surrounding
+            whitespace, an empty string) gives a 422 with pointer /ip_address.
+            A zone (fe80::1%eth0) is not an error: it is dropped and the
+            address is looked up without it. IPv4-mapped IPv6 is treated as
+            IPv4.
+        allowed_countries:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            description: >
+              ISO 3166-1 alpha-2 code. Lower case is upper-cased. No trimming.
+              A duplicate gives a warning; an entry that is not one of the 249
+              assigned codes gives a 422.
+        session_id:
+          description: >
+            Optional correlation key; a string of at most 128 characters (not
+            bytes), UUID recommended. An empty string counts as absent. A longer
+            value or a non-string is ignored and produces the warning
+            invalid_session_id (it is not rejected, so the schema sets no hard
+            constraint).
+        requested_at:
+          description: >
+            Optional RFC 3339 timestamp, any offset and fractional seconds. Only
+            logged, never returned, changes no behaviour. An invalid value or a
+            non-string is ignored and produces the warning invalid_requested_at
+            (it is not rejected, so the schema sets no hard constraint).
+    IpCheckResponse:
+      type: object
+      required: [allowed, reason, detail, country]
+      properties:
+        allowed:
+          type: boolean
+          description: True exactly when reason is country_allowed.
+        reason:
+          type: string
+          enum: [country_allowed, country_not_allowed, country_unknown, country_unsupported]
+        detail:
+          type: string
+          description: Sentence for people. Never repeats the IP. Do not parse.
+        country:
+          oneOf:
+            - $ref: '#/components/schemas/Country'
+            - type: 'null'
+          description: Null when no country is found (country_unknown).
+        session_id:
+          type: string
+          description: Echoed only when the request carried a valid session_id.
+        warnings:
+          type: array
+          minItems: 1
+          description: Omitted when there are no warnings. The code list is open; ignore unknown codes.
+          items:
+            $ref: '#/components/schemas/Warning'
+    Country:
+      type: object
+      required: [iso_code, name]
+      properties:
+        iso_code:
+          type: string
+        name:
+          type: string
+          description: >
+            English name from the database. Informational, never used for
+            logic. An empty string when the database has the code but no
+            English name, so the object always has both members.
+    Warning:
+      type: object
+      required: [code, detail]
+      properties:
+        code:
+          type: string
+          description: >
+            Open set of strings. Known today: duplicate_country,
+            invalid_session_id, invalid_requested_at. Clients ignore codes they
+            do not know.
+        detail:
+          type: string
+        pointer:
+          type: string
+          description: JSON Pointer (RFC 6901) to the part of the request, when it applies.
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: Configured base URL plus the problem name.
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+    InvalidRequestProblem:
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          required: [invalid_params]
+          properties:
+            invalid_params:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                required: [pointer, reason]
+                properties:
+                  pointer:
+                    type: string
+                    description: JSON Pointer (RFC 6901). The empty string means the whole body.
+                  reason:
+                    type: string
+                    description: Quotes an offending country entry as the caller sent it; never quotes the IP.
