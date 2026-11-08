@@ -2,10 +2,12 @@
 
 Claude Code (Claude Sonnet 5.5) was the assistant for the design, the contract, the tests and the code, as the challenge allows. The design decisions were made by the developer, with the AI as an adviser that proposed options and checked claims against sources. This page says what was done, how, and where the commit history does not show it.
 
+**What to read:** this page, then the five `decisions.md` files in `ai-log/` (what the AI proposed, what I chose, why). The `session.md` and `prompts.md` files are the raw edited sessions, kept for the record and not meant to be read in full.
+
 ## Time
 
 - **Roughly 4.3 hours of work, estimated from memory and not tracked, plus further documentation refinements that are not in that figure.** The 4.3 hours are slightly above the 4 hours the challenge suggests, and they include the design work done in the earlier repository. After them I refined the documentation for clarity, mainly to remove noise: the documentation commits at the end of the history, including the cut to a short README, one design-notes file and the OpenAPI contract. I did not estimate the time of those refinements, so the total is more than 4.3 hours. The commits that contain them span 20:54 to 21:48 (about 54 minutes elapsed, not a measure of work time).
-- The GitHub repository was created at 11:44 on 2026-11-08. The first commit is at 15:49 and the last code commit at 20:54. Documentation commits continue until 21:48, the time of the last commit. From the first to the last commit about 6 hours passed, against the estimate of 4.3 hours of work. The difference is breaks that were not recorded.
+- The GitHub repository was created at 11:44 on 2026-11-08. The first commit is at 15:49 and the last code commit at 20:54. From the first commit to `2a34d77` (21:48) about 6 hours passed, against the estimate of 4.3 hours of work. The difference is breaks that were not recorded.
 - The design was first worked out in an **earlier repository** (the design phase), before the first commit here. This repository is a second run of the same workflow. That earlier work is counted in the 4.3 hours but is not reflected in the first commit's timestamp, and its session is not published. The design session of this second run is published as `ai-log/01-design`.
 
 ## Order of work and what the commits show
