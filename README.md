@@ -6,11 +6,131 @@ A small Go HTTP service that answers one question: **is this IP address inside o
 - It looks the IP up in a MaxMind GeoLite2 Country database, held in memory.
 - It answers `200` with `allowed: true` or `false` and a machine-readable `reason`. A blocked IP is a successful check, not an error.
 - An IP with no known country (private, reserved, not in the database) is blocked: the service never fails open.
-- The IP is never logged and never echoed in a response.
+- The IP is never logged and the `ip_address` value is never echoed in a response. One exception: an invalid entry in `allowed_countries` is quoted back in the 422 error text.
 
 Where it sits: `user -> API gateway -> geo-ip-allowlist-service`. A separate update container downloads the database; the service only reads it ([docs/deployment.md](docs/deployment.md)).
 
-## API at a glance
+## System overview
+
+How the service is composed. Boxes are Go packages (under `internal/` and `cmd/`), drawn like classes. The boxes marked `<<interface>>` are the small interfaces that tests replace with fakes.
+
+```mermaid
+classDiagram
+  direction LR
+  class APIGateway {
+    <<external>>
+  }
+  class Geoipupdate {
+    <<external sidecar>>
+    downloads GeoLite2-Country.mmdb
+  }
+  class SharedVolume {
+    <<file>>
+    GeoLite2-Country.mmdb
+  }
+  class Httpapi {
+    check endpoint POST /v1/ip-checks
+    operational endpoints
+    recovery middleware
+    New(Source, Settings, Logger) Handler
+  }
+  class Source {
+    <<interface>>
+    Current() Database
+  }
+  class Request {
+    Parse(body) Request
+  }
+  class Decision {
+    Decide(Lookuper, addr, allowed) Result
+  }
+  class Database {
+    <<interface>>
+    Info() Info
+    Lookup(addr) Record
+  }
+  class DB {
+    MaxMind reader in memory
+  }
+  class Reloader {
+    Current() Database
+    Run(ctx, ticks)
+  }
+  class Statter {
+    <<interface>>
+    ModTime(path)
+  }
+  class Opener {
+    <<interface>>
+    Open(path) Database
+  }
+  class Netclass {
+    Parse(text) Addr
+    Classify(addr) Category
+  }
+  class Iso {
+    Valid(code) bool
+  }
+  class Main {
+    wires everything, config from environment
+  }
+  APIGateway --> Httpapi : HTTP + JSON
+  Httpapi ..> Source : reads the current database
+  Reloader ..|> Source
+  Httpapi --> Request : parse and validate
+  Httpapi --> Decision : decide
+  Request --> Netclass
+  Request --> Iso
+  Decision --> Netclass
+  Decision --> Iso
+  Decision ..> Database : lookup
+  DB ..|> Database
+  Reloader o-- Database : swaps the current one
+  Reloader ..> Statter : polls modification time
+  Reloader ..> Opener : opens and checks a new file
+  Opener ..> DB : creates
+  Geoipupdate --> SharedVolume : writes
+  Statter ..> SharedVolume : reads
+  Opener ..> SharedVolume : reads
+  Main ..> Httpapi
+  Main ..> Reloader
+```
+
+- `Httpapi` is the only part that speaks HTTP. `Request` and `Decision` have no HTTP in them, so they are tested alone.
+- The database is read through the small `Database` interface. `Reloader` holds the current one and swaps it when a new, checked file appears; requests in flight are never dropped.
+- The update container is outside the service: it only writes the file. The service reads it and never holds the MaxMind credentials.
+
+## How a request is handled
+
+What happens to one `POST /v1/ip-checks`. Each check stops at the first failure, and every 4xx and 5xx is the gateway's "error" state. A panic anywhere becomes `500 internal-error` through the recovery middleware.
+
+```mermaid
+flowchart TD
+  A([Request from the gateway]) --> M{POST?}
+  M -- no --> E405[405 method-not-allowed]
+  M -- yes --> CT{Content-Type is JSON?}
+  CT -- no --> E415[415 unsupported-media-type]
+  CT -- yes --> SZ{Body within the size limit?}
+  SZ -- no --> E413[413 request-too-large]
+  SZ -- yes --> J{Valid JSON?}
+  J -- no --> E400[400 malformed-request]
+  J -- yes --> V{Required fields valid?}
+  V -- no --> E422[422 invalid-request, all problems listed]
+  V -- yes --> D{Database loaded?}
+  D -- no --> E503[503 database-unavailable]
+  D -- yes --> C{Private or reserved address?}
+  C -- yes --> UNK[200 country_unknown, blocked]
+  C -- no --> L{Look up the country}
+  L -- lookup error --> E500[500 internal-error]
+  L -- no country found --> UNK
+  L -- not an ISO code --> UNS[200 country_unsupported, blocked]
+  L -- in allowed_countries --> OK[200 country_allowed]
+  L -- not in allowed_countries --> NO[200 country_not_allowed, blocked]
+```
+
+The reasons and the exact bodies are in [docs/api.md](docs/api.md).
+
+## API specification
 
 `POST /v1/ip-checks` with `Content-Type: application/json`.
 
@@ -86,7 +206,7 @@ With a private address (`"ip_address": "10.0.0.1"`) no country can be found, so 
 }
 ```
 
-Every 4xx and 5xx is an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `application/problem+json` document. For the gateway, any 4xx or 5xx means "error". The `type` is `PROBLEM_BASE_URL` (default `https://geo-service.example/problems/`) plus the name below.
+Every 4xx and 5xx the service writes is an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `application/problem+json` document. For the gateway, any 4xx or 5xx means "error". The `type` is `PROBLEM_BASE_URL` (default `https://geo-service.example/problems/`) plus the name below.
 
 | Status | Problem type | When | Example that causes it |
 |---|---|---|---|
@@ -179,7 +299,7 @@ gofmt -l . ; go vet ./... ; go test -race -cover ./...
 **A4. Run with the test database** (in the background; the second line waits until it is ready).
 ```
 GEOIP_DATABASE_PATH=testdata/GeoIP2-Country-Test.mmdb LISTEN_ADDR=127.0.0.1:8080 ./bin/geoip-service > /tmp/geoip.log 2>&1 &
-until curl -sf http://127.0.0.1:8080/livez >/dev/null; do sleep 0.2; done; echo up
+for _ in $(seq 50); do curl -sf http://127.0.0.1:8080/livez >/dev/null && break; sleep 0.2; done; echo up
 ```
 Prints `up`. `/tmp/geoip.log` holds JSON lines, including `"msg":"database loaded"` and a WARN `sanity lookups are off` (expected: no sanity pairs are configured).
 
@@ -234,7 +354,7 @@ Deploying to a cluster needs `kubectl`, a cluster and a MaxMind licence key. It 
 
 ## Assumptions
 
-Short reasons; the full list with sources is in [docs/api-design-notes.md](docs/api-design-notes.md). If the notes and another document disagree, the notes win.
+Short reasons; the full list with sources is in [docs/api-design-notes.md](docs/api-design-notes.md).
 
 - **A blocked IP is `200`, not an error.** The gateway has three states: allowed, not allowed, error.
 - **No country means blocked** (`country_unknown`), and there is no fallback to `registered_country`: failing open would let anyone bypass the restriction.
@@ -245,19 +365,49 @@ Short reasons; the full list with sources is in [docs/api-design-notes.md](docs/
 - **The service starts without a database** and answers `503` until the first file arrives, so the sidecar has time to download it.
 - **A bad or older database file is rejected** and the old data kept, with an ERROR log.
 - **Plain HTTP inside the cluster**, limited by a NetworkPolicy to the gateway namespace. The IP the gateway sends is trusted.
-- **Very old data still answers.** Whether it should stop is an open business question (BQ2).
+- **`/metrics` uses the standard library**, not the Prometheus client: it has three series and no new dependency. Switch only for histograms or runtime metrics (notes, G69).
+- **Very old data still answers.** Whether it should stop is an open business question (BQ2, [below](#open-questions-for-the-business-team)).
+
+## Open questions for the business team
+
+Not blocking: the service works with the defaults below. Reasons and sources: [docs/api-design-notes.md](docs/api-design-notes.md), section G (BQ2, BQ3) and section E.
+
+| ID | Question | Who can answer | Default today |
+|---|---|---|---|
+| BQ2 | Should very old data ever stop the service from answering? What does the GeoLite2 licence require about update frequency and deleting outdated copies? | The MaxMind account holder and legal | Keep answering and show the age (`database_built_at` in `/readyz` and `/version`, `database_build_timestamp_seconds` in `/metrics`). The update container refreshes every 24 hours. |
+| BQ3 | May end users see the `detail` texts? They are in English and name countries. | Product and the customer-facing team | `detail` is written for the gateway and for support, not for end users. |
+
+Limits the business should know and accept (notes, section E): VPNs and proxies are not detected, and Kosovo (`XK`) can never be allowed because the contract is ISO 3166-1 alpha-2.
+
+## For the gateway team
+
+What the gateway needs to know. The full contract is [docs/api.md](docs/api.md) and [api/openapi.yaml](api/openapi.yaml); the reasons are in the notes (A3, A4, D1, E7, J4).
+
+- **Three states.** `200` with `allowed: true`: let the user in. `200` with `allowed: false`: block. Any `4xx` or `5xx`: "error".
+- **Switch on `reason`, never parse `detail`.** The four values are in [the API specification](#api-specification). Ignore `warnings` codes you do not know.
+- **A warning is a hint, not a failure.** It tells you a part of the request was not used (for example a duplicate country); the decision is still valid.
+- **Send the real client address as `ip_address`.** The service trusts it. A private, loopback or reserved address is answered `country_unknown` and blocked, so send the address of the user, not of a proxy.
+- **`session_id`** (a UUID is recommended; any string of at most 128 characters is accepted) is echoed back and written to every log line of the request, so you can correlate. It is optional.
+- **`503` means "retry later".** It happens until the first database file is loaded. `/readyz` is `200` when the service can answer.
+- **Limits.** Request body at most 16384 bytes; the service gives up on a request after 10 seconds. Plain HTTP inside the cluster.
+- **Address.** The Kubernetes Service is `geoip-service`, port 80. The NetworkPolicy admits only the namespace named `api-gateway`, which is a **placeholder** in the manifest ([docs/deployment.md](docs/deployment.md#what-you-must-change-first)).
+
+Open for the gateway team (not defined by this service):
+- What should the gateway do in the "error" state: let the user in or block? The design only says that `4xx`/`5xx` is the client's error state; the policy is the gateway's.
+- What is the real name of the gateway namespace, for the NetworkPolicy?
+- Which URL should be `PROBLEM_BASE_URL`? The default `https://geo-service.example/problems/` is a placeholder.
 
 ## What is built and what is only designed
 
 - **Built and tested:** the check endpoint, `/livez`, `/readyz`, `/version`, `/metrics`, reload of the database file, and the Dockerfile (built and run with Podman).
 - **Designed only:** gRPC (design in the notes, section F2), VPN and proxy detection (not planned; known limitation).
-- **Written but not run:** the two Compose files (their service container settings were run with `podman run`).
-- **Run on a local cluster:** the Kubernetes manifest was applied to a local `kind` cluster, and the service answered through `kubectl port-forward` ([docs/deployment.md](docs/deployment.md#run-on-kubernetes)).
-- **Not tested:** the real GeoLite2 file (tests never use it) and the update sidecar's download.
+- **Run:** `docker-compose.test.yml`, and `docker-compose.yml` with a real MaxMind account (the real GeoLite2 file was downloaded and answered), both with Docker Compose v5.6.0 against Podman's socket.
+- **Run on a local cluster:** the Kubernetes manifest on `kind`, with a placeholder Secret and with a real one (real download, sanity check pass and fail, `kubectl port-forward` checks, NetworkPolicy enforced). See [docs/deployment.md](docs/deployment.md#run-on-kubernetes).
+- **Not tested:** the unit tests never use the real GeoLite2 file (by design); the daily update after the first download; clusters other than `kind`; plain `docker` (everything was run with Podman).
 
 ## Use of AI
 
-Claude Code was used under the developer's direction; the developer made the design decisions. See [docs/ai-usage.md](docs/ai-usage.md).
+Claude Code was used under the developer's direction. See [docs/ai-usage.md](docs/ai-usage.md) for the usage notes, accepted fixes, and edited prompt/session logs.
 
 ## Licence and data
 

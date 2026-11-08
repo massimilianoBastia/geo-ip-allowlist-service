@@ -2,8 +2,7 @@
 
 Go service that answers one question: is this IP address inside one of the
 allowed countries? Used by the API gateway to restrict UI logins by country.
-The brief is in `docs/request.md`, the design in `docs/design/`, the contracts
-in `api/`. If code and design disagree, the design wins: stop and ask.
+The design is in `docs/design/` and the contracts in `api/`. If code and design disagree, the design wins: stop and ask.
 
 ## Working rules
 
@@ -13,7 +12,7 @@ in `api/`. If code and design disagree, the design wins: stop and ask.
 - Never change or delete an existing test to make it pass. If a test looks
   wrong, tell me.
 - Don't add features or files that the plan doesn't ask for.
-- If you test the component follow strictly the workflow defined in the READM.md either by building the binary or by installing the local cluster
+- If you test the component follow strictly the workflow defined in the README.md either by building the binary or by installing the local cluster
 
 ## Go style
 

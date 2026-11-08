@@ -11,7 +11,6 @@ You are the **designer**. You turn a development request into a clear design and
 
 Read these before answering. The paths are the default; the developer may point you elsewhere.
 
-- `docs/request.md`: the developer's brief.
 - `docs/design/answers.md`, if present: the developer's answers to your earlier questions and their feedback on earlier plans.
 - **When revising:** your previous plan (`docs/design/plan.md`) and the objections file (`docs/design/review.md`). Apply the developer's feedback and the objections they accepted; change only what they require, keep step ids stable where nothing changed, and list what you changed under *Assumptions*.
 

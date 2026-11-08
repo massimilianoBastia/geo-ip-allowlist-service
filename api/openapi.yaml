@@ -22,7 +22,8 @@ paths:
       summary: Check whether an IP address is in one of the allowed countries
       description: >
         Returns 200 whenever the check completes, also when the result is "not
-        allowed". The IP is never echoed in the response and never logged.
+        allowed". The ip_address value is never echoed in the response and never logged
+        (an invalid allowed_countries entry is quoted back in a 422 reason).
         Checks run in this order and each stops at the first failure: method
         (405), Content-Type (415), body size (413), JSON syntax (400). Field
         validation then returns one 422 listing every problem. The database

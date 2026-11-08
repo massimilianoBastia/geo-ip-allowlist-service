@@ -57,7 +57,7 @@ podman save -o /tmp/geoip-image.tar docker.io/library/geo-ip-allowlist-service:0
 KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive /tmp/geoip-image.tar --name geoip
 ```
 
-The default kind network may not enforce a `NetworkPolicy`. A test there proves the manifest applies, not that the policy blocks traffic.
+A `NetworkPolicy` is enforced by the cluster's network plugin (CNI), not by Kubernetes itself; a plugin without policy support accepts the object and ignores it without an error. With kind v0.33.0 (default network `kindnetd` v20260820) this repository's policy was enforced when tested. Other kind versions or network plugins were not tested, so check enforcement there before relying on it ([how to check](#check-that-the-networkpolicy-is-enforced)).
 
 Remove the cluster when done:
 
@@ -82,7 +82,7 @@ The service is configured only through environment variables. An unset or empty 
 | `LISTEN_ADDR` | `:8080` | Address to listen on. Use `127.0.0.1:8080` on a laptop to stay off the network. |
 | `GEOIP_DATABASE_PATH` | `/usr/share/GeoIP/GeoLite2-Country.mmdb` | Path of the `.mmdb` file. The service only reads it. |
 | `DATABASE_POLL_INTERVAL` | `60s` | How often the file's modification time is checked. Go duration, must be positive. |
-| `DATABASE_SANITY_CHECKS` | empty | Known pairs `ip=CC,ip=CC` checked before every swap, for example `81.2.69.160=GB,2001:218::1=JP`. Empty never stops the service: it logs one WARN `sanity lookups are off`. A malformed value, a trailing comma or a lower-case code is a start error. Use pairs that are true for the **real** file; those two are true for the test database only. |
+| `DATABASE_SANITY_CHECKS` | empty | Known pairs `ip=CC,ip=CC` checked before every swap, for example `81.2.69.160=GB,2001:218::1=JP`. Empty never stops the service: it logs one WARN `sanity lookups are off`. A malformed value, a trailing comma or a lower-case code is a start error. Use pairs that are true for the **real** file; the example pairs are true for the test database only. For the real GeoLite2-Country file, `8.8.8.8=US,2001:4860:4860::8888=US` were true when tested on 2026-11-08 (database built 2026-11-06): a true pair loads the file, a false pair is rejected with `database rejected` / `check: sanity`. |
 | `MAX_REQUEST_BODY_BYTES` | `16384` | Largest accepted request body. Positive integer. |
 | `PROBLEM_BASE_URL` | `https://geo-service.example/problems/` | Prefix of the `type` in error documents. Must be an absolute URL; a missing trailing `/` is added. The default is a placeholder: set it to a URL you control. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` (any case). |
@@ -142,13 +142,21 @@ docker compose up --build
 
 `secrets/*` is ignored by git except the `*.example` files. At first the service answers `503` on `/readyz` while the download runs; it turns `200` when the file is loaded (the log shows `database loaded`). Set `DATABASE_SANITY_CHECKS` in the file (it is empty) with pairs that are true for the real database. The `geoipupdate` container has no read-only root filesystem in Compose, so it needs no `/tmp` volume there.
 
-> Not tested: no Compose tool was available when this was written, and no MaxMind account was used. The service container settings of both files were run with `podman run`; the YAML files were parsed but not executed by Compose.
+**Podman on a host with SELinux enforcing (for example Fedora).** The update container may stop with `failed to open GEOIPUPDATE_ACCOUNT_ID_FILE: ... permission denied`, because the bind-mounted secret files have the label `user_home_t`. Label the two files once, then start again:
+
+```
+chcon -t container_file_t secrets/geoipupdate_account_id secrets/geoipupdate_license_key
+```
+
+(Seen on Fedora with rootless Podman: before the label the container could not read the files, after it the download worked. Docker on a host where SELinux is not enabled for the daemon does not need this.)
+
+> What was tested: `docker-compose.test.yml` was run with Docker Compose v5.6.0 against Podman's socket (`DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock`): `/readyz` gave `HTTP 200` and a check gave `country_allowed`. `docker-compose.yml` was run the same way with a real MaxMind account: the update container downloaded `GeoLite2-Country.mmdb` (built 2026-11-06), `/readyz` gave `HTTP 200` with `"database_type":"GeoLite2-Country"` after about a minute, and checks on real addresses gave the expected countries (`8.8.8.8` is `US`). The service log did not contain the checked IP. `docker compose config` does not complain about missing secret files, so copy them first (see above).
 
 ## Run on Kubernetes
 
 `deploy/kubernetes/geoip-service.yaml` holds, in one namespace: a **Deployment** (2 replicas, each pod = the service + the `geoipupdate` sidecar sharing an `emptyDir` with the database), a **Service** (`ClusterIP`, port 80 to 8080) and a **NetworkPolicy**. The Secret is deliberately **not** in this file.
 
-> What was tested: the manifest was applied to a `kind` v0.33.0 cluster (rootless Podman, `kubectl` v1.37.2) with the image built from this repository. Both containers started, the service loaded a database and answered through `kubectl port-forward`. What was **not** tested: the download from MaxMind (no licence key; the database file was copied in by hand, see [below](#test-on-kubernetes-without-a-licence-key)), the NetworkPolicy being enforced (not checked), and any cluster other than kind.
+> What was tested: the manifest was applied to a `kind` v0.33.0 cluster (rootless Podman, `kubectl` v1.37.2) with the image built from this repository, twice. (1) With a placeholder Secret and the database copied in by hand ([below](#test-on-kubernetes-without-a-licence-key)). (2) With a real Secret created from a real MaxMind account as in [Create the Secret](#create-the-secret): both pods reached `2/2` with no manual step, the sidecar downloaded the database, `/readyz` gave `HTTP 200` with `"database_type":"GeoLite2-Country"`, `kubectl port-forward` checks gave the expected countries, and the account id and licence key were in neither the Deployment spec nor the environment of either container. Changing `DATABASE_SANITY_CHECKS` to a pair that is false for the real file (`8.8.8.8=DE`) left the new pod at `1/2` with `database rejected` / `check: sanity` in its log, while the old pods kept answering. The NetworkPolicy was enforced: a pod in a namespace named `api-gateway` got `HTTP 200` from `/readyz`, a pod in another namespace timed out. Not tested: any cluster other than kind, and the daily update (the sidecar sleeps 24 hours after the first download).
 
 ### What you must change first
 
@@ -222,6 +230,22 @@ kubectl -n geoip port-forward svc/geoip-service 8080:80
 ```
 
 The service polls every 60 s, so allow up to a minute. Expect `successfully rolled out` and two pods `2/2`. With the port-forward running, `curl -s http://127.0.0.1:8080/readyz` gives `HTTP 200` and the calls in the [README](../README.md#workflow-a-run-the-go-binary) (A5, A6) work. The sidecar restarts now and then, because its download is refused on purpose; that is expected. Delete everything with `kubectl delete namespace geoip`.
+
+### Check that the NetworkPolicy is enforced
+
+With the pods ready (previous section), call the Service from a namespace named `api-gateway` (the name in the policy) and from another one:
+
+```
+kubectl create namespace api-gateway
+kubectl create namespace other
+for ns in api-gateway other; do
+  echo "== from namespace $ns"
+  kubectl -n $ns run t --image=docker.io/curlimages/curl:8.11.1 --restart=Never --rm -i --quiet --command -- \
+    curl -s -m 6 -o /dev/null -w 'HTTP %{http_code}\n' http://geoip-service.geoip.svc/readyz
+done
+```
+
+Expect `HTTP 200` from `api-gateway` and `HTTP 000` (timeout) from `other`. If both give `200`, your network plugin ignores the policy. (The `other` run ends with `pod other/t terminated (Error)`; that is the timeout.)
 
 ### Two details the sidecar needs
 

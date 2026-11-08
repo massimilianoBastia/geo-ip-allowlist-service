@@ -1,6 +1,6 @@
 # API reference
 
-The detailed description of the HTTP API of geo-ip-allowlist-service. The README has the short version: [README.md](../README.md#api-at-a-glance).
+The detailed description of the HTTP API of geo-ip-allowlist-service. The README has the short version: [README.md](../README.md#api-specification).
 
 ## Which file is the authority
 
@@ -21,7 +21,7 @@ This file adds no rule of its own. The examples marked "run" were produced by st
 - Requests and successful answers are JSON (`application/json`). Errors are `application/problem+json` ([RFC 9457](https://www.rfc-editor.org/rfc/rfc9457)).
 - JSON member names are `snake_case`.
 - The client has three states: allowed, not allowed, error. **Any 4xx or 5xx is "error".** A check that completes is always `200`, also when the IP is blocked.
-- The IP address is never echoed in a response and never written to a log line.
+- The `ip_address` value is never echoed in a response and never written to a log line. One exception: an invalid entry in `allowed_countries` is quoted back to the caller in the 422 `reason`, as the caller sent it (it is not logged).
 - Unknown paths get the standard library `404 page not found` (`text/plain`), not a problem document.
 
 ## Endpoints
@@ -49,7 +49,7 @@ Header `Content-Type: application/json` (a `charset` parameter is accepted). Bod
 
 Other rules:
 
-- Unknown fields are ignored: never rejected, never a warning (their names are logged at DEBUG). A misspelled required field counts as missing.
+- Unknown fields are ignored: never rejected, never a warning (only their count is logged at DEBUG, never their names). A misspelled required field counts as missing.
 - If a key is repeated in the JSON object, the last one wins.
 - Data after the JSON value (`{} {}`) is a `400`.
 
@@ -345,7 +345,7 @@ On `/livez`, `/readyz`, `/version`, `/metrics` the header is `Allow: GET, HEAD` 
 }
 ```
 
-A country entry in a `reason` is quoted as the caller sent it; the IP is never quoted. Body `[]` (valid JSON, not an object) has the single pointer `""`:
+A country entry in a `reason` is quoted as the caller sent it, even if the caller put an address there; the `ip_address` value is never quoted. Body `[]` (valid JSON, not an object) has the single pointer `""`:
 
 ```json
 {
@@ -395,7 +395,7 @@ All `invalid_params` texts are listed in [problems.md](problems.md#invalid-reque
 | | problems | `application/problem+json` |
 | | `/metrics` | `text/plain; version=0.0.4; charset=utf-8` |
 | `Allow` | every `405` | `POST` on the check, `GET, HEAD` on operational endpoints |
-| `Content-Length` | every answer the service writes | set |
+| `Content-Length` | every answer except `HEAD` | set |
 
 The service reads no other request header: no token, no `X-Forwarded-For`. The IP to check is always the one in the body.
 
@@ -422,7 +422,7 @@ One summary line `request handled` per check, with `method`, `path`, `status`, `
 | `country_allowed`, `country_not_allowed`, any 4xx | INFO |
 | `country_unknown` (with `address_category`: `private`, `loopback`, `link_local`, `unspecified`, `reserved` or `public_unmapped`), `country_unsupported` | WARN |
 | Any 5xx, including `503` while no database is loaded | ERROR |
-| Request lines for `/livez`, `/readyz`, `/version`, `/metrics`; the names of unknown fields | DEBUG |
+| Request lines for `/livez`, `/readyz`, `/version`, `/metrics`; the number of unknown fields | DEBUG |
 
 An ignored optional field adds a WARN line `optional field ignored` with `field` and, instead of the value, its length (`session_id_length`) or its JSON type (`session_id_type`, for example `number`, `null`). A panic is an ERROR with the Go type of the panic value and the stack, not the value itself. Database events (loaded, rejected, waiting for the first file, sanity lookups off) are logged by the reloader; see [deployment.md](deployment.md). Set the level with `LOG_LEVEL`.
 

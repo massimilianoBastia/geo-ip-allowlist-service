@@ -1,6 +1,6 @@
 # Plan: geo-ip-allowlist-service
 
-> **APPROVED** by the developer (revision 3, after two grillz reviews). Not committed. No code has been started; code steps start in a later session, one step at a time, in the order below.
+> **APPROVED** by the developer (revision 3, after two grillz reviews). Steps are done one at a time, in the order below.
 > Approval scope: this plan and all proposed items G2 to G47 in `docs/api-design-notes.md`, as written there (source PLAN-APPROVAL in the notes appendix). Exception recorded at approval: the sanity-lookups setting must never make startup fail; if it is empty or unset the service logs a WARN and starts. G1, the ISO check date, was supplied by the developer later in the session and is recorded in G1 of the notes.
 > A = approved by the developer with a question ID. P = proposed by the designer and approved at plan approval (listed in notes section G).
 
@@ -28,7 +28,7 @@ Build a small, stateless Go service for the API gateway. It answers `POST /v1/ip
 - **Logs.** JSON, never contain the IP, carry `session_id`.
 - **Operational endpoints.** `/livez`; `/readyz` (includes `database_built_at`); `/version` (`{version, database_built_at}`).
 - **Deployment.** Dockerfile and Kubernetes manifest with the update sidecar. Optionally Compose and `/metrics`.
-- **Documents.** Design notes (with the question-and-answer log), then OpenAPI contract, then agent brief. Where they disagree, the earlier one wins.
+- **Documents.** Design notes (with the question-and-answer log), then OpenAPI contract. Where they disagree, the earlier one wins.
 
 ## Layout (Go server project, A: GR1)
 
@@ -125,7 +125,7 @@ Unit tests sit next to their code. Scenario tests live only in `tests/scenarios/
 | EC-26 | Non-ISO code `XK` | `country_unsupported`, `{XK, Kosovo}`; fake lookup | S-010 u, S-014 u |
 | EC-27 | `session_id` edge values | Echoed / warning / omitted | S-009 u, S-014 u |
 | EC-28 | `requested_at` | Valid is logged; invalid warns; never returned | S-009 u, S-014 u |
-| EC-29 | Unknown fields | Ignored; names logged at DEBUG | S-009 u, S-014 u |
+| EC-29 | Unknown fields | Ignored; only the count logged at DEBUG | S-009 u, S-014 u |
 | EC-30 | No DB at startup | `/readyz` and checks 503; `/livez` 200; `/version` 200 `{"version":"..."}` without `database_built_at` (P) | S-012 u, S-014 u, S-015 u, S-016 u |
 | EC-31 | New file corrupt, wrong type, older, or fails sanity | Old data kept; one ERROR per mtime | S-012 u |
 | EC-32 | Swap during in-flight requests | No failures, no data race | S-012 u |
@@ -220,7 +220,7 @@ flowchart LR
 
 ## Steps
 
-Order: documents (S-001 to S-003); core (S-004 to S-016, S-023, S-017); core deployment (S-018, S-020); optional (S-019, then S-022). Cut from the end: S-022 first, then S-019.
+Order: documents (S-001, S-002); core (S-004 to S-016, S-023, S-017); core deployment (S-018, S-020); optional (S-019, then S-022). Cut from the end: S-022 first, then S-019.
 
 ### S-001 Design notes: `docs/api-design-notes.md`
 Depends on: none. Sections A to K plus an appendix (decision log). Every item has an ID, status, reason, source. Test (manual review): sections A to K and the appendix exist; every A item cites an ID with an appendix entry; D11 and J7 have the stated meanings; G numbering has no gaps from G1 upwards and each item is listed once, and every item marked P anywhere in the notes has a G entry; performance numbers appear only in D7 (one run on the synthetic database, no threshold) and G2 only points to D7. (Content: see the notes file.)
@@ -229,12 +229,11 @@ Depends on: none. Sections A to K plus an appendix (decision log). Every item ha
 Depends on: S-001. Paths `POST /v1/ip-checks`, `/livez`, `/readyz`, `/version`, `/metrics` (optional). `warnings.code` open string. Problem schema, example per status. No `.proto`.
 Test (manual): only `post` on `/v1/ip-checks`; request `required: [ip_address, allowed_countries]`, `minItems: 1`; `session_id` and `requested_at` carry no hard type, `maxLength` or `format` constraint in the request schema (the service accepts bad values with a warning, so the schema must not reject them); the description says "at most 128 characters, UUID recommended; a longer or non-string value is ignored with a warning" and "RFC 3339; an invalid value is ignored with a warning"; response `required: [allowed, reason, detail, country]`, `reason` enum of exactly four values, `country` object or null; 400, 405, 413, 415, 422, 500, 503 use `application/problem+json`; 422 has `invalid_params` items `{pointer, reason}`; `/version` `{version (required), database_built_at (optional date-time)}`; `/readyz` 200 has `database_built_at`; no `/healthz`; example texts match notes A6-A9 exactly.
 
-### S-003 Agent brief: `docs/agent-design-brief.md`
-Depends on: S-002. Contract summary; rules R1..Rn each citing a notes ID; pipeline including recovery; layout; one acceptance example (`81.2.69.160`, `["GB"]` gives `allowed: true`); out of scope; "the notes win".
-Test (manual): every rule cites an existing notes ID and contradicts none; `/livez` and `/version` present; no `/healthz`; no rationale text and no performance number (rule values such as 16,384, 249 and 128 are expected).
+### S-003 Agent brief (dropped)
+Dropped on 2026-11-08 (G74): `docs/agent-design-brief.md` repeated the notes and the contract and went out of date. The notes and `api/openapi.yaml` are the rules.
 
 ### S-004 Module settings and `main` placeholder
-Depends on: S-003. Files: `go.mod`, `cmd/geoip-service/main.go`. Run `go mod edit -go=1.26 -toolchain=go1.26.10` (S-005's `go mod tidy` later raises the line to `go 1.26.0`, G53). Leave both requirements as they are (`maxminddb-golang/v2 v2.9.0 // indirect`, `golang.org/x/sys v0.49.0 // indirect`); no `go mod tidy` yet (nothing imports the library; P, G38). `main.go` is an empty `main`.
+Depends on: S-002. Files: `go.mod`, `cmd/geoip-service/main.go`. Run `go mod edit -go=1.26 -toolchain=go1.26.10` (S-005's `go mod tidy` later raises the line to `go 1.26.0`, G53). Leave both requirements as they are (`maxminddb-golang/v2 v2.9.0 // indirect`, `golang.org/x/sys v0.49.0 // indirect`); no `go mod tidy` yet (nothing imports the library; P, G38). `main.go` is an empty `main`.
 Test (CLI): `go version` prints `go1.26.10 linux/amd64`; first four lines of `go.mod` are the module line, an empty line, `go 1.26`, `toolchain go1.26.10` (after S-005: `go 1.26.0`, G53); `go build ./...` exits 0; gate passes.
 
 ### S-005 README check of the test database (test-only; `internal/geoipdb`)
@@ -324,7 +323,7 @@ Test (unit, recorder):
 - Not ready: 503 `database-unavailable` for a valid request. Not ready and an invalid body (for example `{}`): 422 `invalid-request`, not 503 (notes A15). Decision error: 500 "An unexpected error occurred." plus ERROR log. Fake lookup `XK`: 200 `country_unsupported`, `{"iso_code":"XK","name":"Kosovo"}`.
 - `session_id "abc"`: echoed; every log line has `session_id=abc`. 129 runes: not in response, warning present, WARN log `session_id_length=129`.
 - Valid `requested_at`: summary log line has `requested_at="2026-11-08T10:00:00.5+01:00"`; response does not include it.
-- Unknown fields `foo`, `bar`: DEBUG `unknown_fields=["bar","foo"]` (sorted, P) and `unknown_fields_count=2`, no values.
+- Unknown fields `foo`, `bar`: DEBUG `unknown_fields_count=2` only; no names, no values (G75). A field named like an address does not appear in any log line.
 - No warnings: no `warnings` key. `/nope`: 404 body `404 page not found`.
 - Every problem response has `Content-Type: application/problem+json`. No log line or response body contains `81.2.69.160`.
 
@@ -364,4 +363,4 @@ Test (manual): `docker compose config` shows secrets only on geoipupdate, `GEOIP
 
 ### S-022 `/metrics` (optional; cut first)
 Depends on: S-014, S-012. Files `internal/httpapi/metrics.go`, `metrics_test.go`.
-Test (unit): `GET /metrics` 200 `Content-Type: text/plain; version=0.0.4`; after one allowed check `ip_checks_total{reason="country_allowed"} 1`; after one 422 `http_problems_total{type="invalid-request"} 1`; build `2026-01-02T03:04:05Z` gives `database_build_timestamp_seconds 1767323045`; `POST` gives 405 `Allow: GET, HEAD`. If this step is cut, remove K4 from the notes first, then the contract, then the brief.
+Test (unit): `GET /metrics` 200 `Content-Type: text/plain; version=0.0.4`; after one allowed check `ip_checks_total{reason="country_allowed"} 1`; after one 422 `http_problems_total{type="invalid-request"} 1`; build `2026-01-02T03:04:05Z` gives `database_build_timestamp_seconds 1767323045`; `POST` gives 405 `Allow: GET, HEAD`. If this step is cut, remove K4 from the notes first, then the contract.

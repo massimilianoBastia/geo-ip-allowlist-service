@@ -1,25 +1,27 @@
 # Use of AI
 
-AI coding tools (Claude Code) were used, as the challenge allows. The design decisions were made by the developer, with the AI as an adviser that proposed options and checked claims against sources.
+Claude Code was the assistant for the design, the contract, the tests and the code, as the challenge allows. The design decisions were made by the developer, with the AI as an adviser that proposed options and checked claims against sources.
 
-## Two runs
-
-The design was first worked out in an earlier repository (the design phase). This repository is a second run of the same workflow, session by session: design, plan review, contract, skeleton and failing tests, implementation, review and coverage, operations and documentation. Sessions 02 to 08 belong to this second run.
+After the last commit, Claude Code was also used to review the repository (`docs/testing-audit.md`). It wrote that report and the two test files `internal/httpapi/audit_test.go` and `internal/request/audit_test.go`. They were accepted because they test documented behaviour, add no dependency and pass `go vet` and the race detector. Its findings 2 and 3 were then fixed with Claude Code (G75, G76); findings 1, 4 and 5 were not fixed and are listed as known limitations in that report.
 
 ## Developer replies
 
-In the second run, the developer's replies to the workflow agents were drafted with a second AI assistant from the decisions the developer had already recorded in the first run. The developer reviewed each reply and sent it. Where a reply repeats an earlier decision, the reason and the source are given in the notes (docs/api-design-notes.md).
+A second Claude Code session was used to clean up and standardise the developer's replies, so that the main agent received clear, consistent prompts. The developer reviewed and sent each reply.
 
-## Changes to approved tests
+## Process and time
 
-| Test | Change | Reason |
+- **Time spent:** about 4 hours 30 minutes of work in total, which is above the 4 hours the challenge suggests. This is the developer's estimate from memory; no time was tracked. The GitHub repository was created at 11:44 on 2026-11-08, the first commit is at 15:49 and the last pushed work is at 19:56 the same day, so the elapsed time is longer than the hours of work, and the exact breaks were not recorded.
+- **Order of work:** the design notes and the contract (`api/openapi.yaml`) were written first, before the code. They were committed late (16:45), after the first code commits, so the commit order does not show the real order of work.
+- **Agents:** the first stage (design, `ai-log/01-design`) used two Claude Code subagents that the developer defined, in `.claude/agents/`: `designer` turns the request into a design and an ordered plan of small steps, and `grillz` challenges that plan for gaps and untestable steps before the developer approves it. They only read files and never write code. Every later stage was a plain Claude Code session without custom agents.
+
+## Prompts and sessions
+
+Edited copies of the Claude Code sessions, one set per phase. Personal identifiers are replaced with placeholders and the developer's instructions are lightly paraphrased, so they are not verbatim. Tool calls and results are left out. Raw system notifications are removed. The logs are the exported sessions of each phase, not necessarily every prompt. The last session, which fixed the audit findings (unknown-field logging, timestamp check) and cleaned up the documentation, is not included.
+
+| Phase | Prompts | Session |
 |---|---|---|
-| internal/netclass/classify_test.go | Added a subtest: the zero address is classified as reserved | Fail closed: an invalid address must never count as public. Approved by the developer and recorded in G51 and G54. |
-
-## Prompts
-
-The raw prompt logs are not published. They can contain sensitive data, so they are excluded from git.
-
-## Corrections made to AI output
-
-(To be completed at submission: for each piece of AI output, whether it was accepted or rejected, and why.)
+| Design | [Prompts](ai-log/01-design/prompts.md) | [Session](ai-log/01-design/session.md) |
+| Contract review | [Prompts](ai-log/02-contract/prompts.md) | [Session](ai-log/02-contract/session.md) |
+| Skeleton and tests | [Prompts](ai-log/03-skeleton-tests/prompts.md) | [Session](ai-log/03-skeleton-tests/session.md) |
+| Implementation | [Prompts](ai-log/04-coding/prompts.md) | [Session](ai-log/04-coding/session.md) |
+| Refinements | [Prompts](ai-log/05-refinements/prompts.md) | [Session](ai-log/05-refinements/session.md) |

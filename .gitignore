@@ -24,5 +24,8 @@ coverage.*
 .vscode/
 .DS_Store
 
-#AI Dump
-docs/ai-log
+# Raw AI dumps stay private; only edited disclosure copies are included.
+docs/ai-log/**
+!docs/ai-log/*/
+!docs/ai-log/*/prompts.md
+!docs/ai-log/*/session.md

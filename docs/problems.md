@@ -17,7 +17,7 @@ Unknown paths get the standard library 404, which is not a problem document.
 
 ## `invalid-request`
 
-Only this type has `invalid_params`, a list of `{pointer, reason}` (JSON Pointer, RFC 6901; no codes). All problems of one request are listed together: `ip_address` first, then `allowed_countries` by ascending index. A body that is not a JSON object has the single pointer `""`. A country entry in a reason is quoted as the caller sent it; the IP address is never quoted.
+Only this type has `invalid_params`, a list of `{pointer, reason}` (JSON Pointer, RFC 6901; no codes). All problems of one request are listed together: `ip_address` first, then `allowed_countries` by ascending index. A body that is not a JSON object has the single pointer `""`. A country entry in a reason is quoted as the caller sent it, even if it looks like an address (G76); the `ip_address` value is never quoted.
 
 | Pointer | Reason |
 |---|---|
