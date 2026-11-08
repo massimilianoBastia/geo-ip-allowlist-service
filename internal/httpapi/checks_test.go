@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/massimilianoBastia/geo-ip-allowlist-service/internal/geoipdb"
@@ -258,6 +259,32 @@ func TestContentType(t *testing.T) {
 	}
 }
 
+// TestHeadIsNotAllowedOnCheck covers G64: HEAD is a method that is not POST.
+func TestHeadIsNotAllowedOnCheck(t *testing.T) {
+	rec := newHarness(gbDB).do(http.MethodHead, "/v1/ip-checks", "application/json", validBody)
+	if rec.Code != 405 {
+		t.Fatalf("status = %d, want 405", rec.Code)
+	}
+	if got := rec.Header().Get("Allow"); got != "POST" {
+		t.Errorf("Allow = %q, want POST", got)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/problem+json" {
+		t.Errorf("Content-Type = %q, want application/problem+json", got)
+	}
+}
+
+// TestBodyReadError covers G63: a body that cannot be read, for a reason other
+// than the size limit, is answered as malformed-request.
+func TestBodyReadError(t *testing.T) {
+	h := newHarness(gbDB)
+	req := httptest.NewRequest(http.MethodPost, "/v1/ip-checks", iotest.ErrReader(errors.New("connection reset")))
+	req.Header.Set("Content-Type", "application/json")
+	req.ContentLength = -1
+	rec := httptest.NewRecorder()
+	h.handler.ServeHTTP(rec, req)
+	wantProblem(t, rec, 400, "malformed-request", "Malformed request", "The request body is not valid JSON.")
+}
+
 func TestBodySizeLimit(t *testing.T) {
 	padded := func(n int) string { return validBody + strings.Repeat(" ", n-len(validBody)) }
 	const detail = "The request body exceeds the maximum allowed size of 16384 bytes."
@@ -422,8 +449,8 @@ func TestUnknownFieldsLoggedAtDebug(t *testing.T) {
 	h.post(`{"ip_address":"81.2.69.160","allowed_countries":["GB"],"foo":"secret-value","bar":1}`)
 	for _, r := range h.records(t) {
 		if r["level"] == "DEBUG" && r["unknown_fields_count"] == float64(2) {
-			if !reflect.DeepEqual(r["unknown_fields"], []any{"bar", "foo"}) {
-				t.Errorf("unknown_fields = %v, want [bar foo]", r["unknown_fields"])
+			if _, ok := r["unknown_fields"]; ok {
+				t.Error("unknown field names were logged")
 			}
 			if strings.Contains(h.logs.String(), "secret-value") {
 				t.Error("an unknown field value was logged")
@@ -431,25 +458,17 @@ func TestUnknownFieldsLoggedAtDebug(t *testing.T) {
 			return
 		}
 	}
-	t.Errorf("no DEBUG line with unknown_fields; logs:\n%s", h.logs)
+	t.Errorf("no DEBUG line with unknown_fields_count; logs:\n%s", h.logs)
 }
 
-func TestUnknownFieldNamesAreCapped(t *testing.T) {
-	var fields []string
-	for i := 0; i < 25; i++ {
-		fields = append(fields, `"f`+string(rune('a'+i))+`":1`)
-	}
+// TestUnknownFieldNamesAreNotLogged: names are caller-controlled, so an
+// address used as a field name must not reach the logs (G75).
+func TestUnknownFieldNamesAreNotLogged(t *testing.T) {
 	h := newHarness(gbDB)
-	h.post(`{"ip_address":"81.2.69.160","allowed_countries":["GB"],` + strings.Join(fields, ",") + `}`)
-	for _, r := range h.records(t) {
-		if r["unknown_fields_count"] == float64(25) {
-			if names, _ := r["unknown_fields"].([]any); len(names) != 20 {
-				t.Errorf("logged %d names, want 20", len(names))
-			}
-			return
-		}
+	h.post(`{"ip_address":"81.2.69.160","allowed_countries":["GB"],"81.2.69.160":"ignored","foo":1}`)
+	if strings.Contains(h.logs.String(), "81.2.69.160") || strings.Contains(h.logs.String(), "foo") {
+		t.Errorf("an unknown field name was logged:\n%s", h.logs)
 	}
-	t.Errorf("no DEBUG line with 25 unknown fields; logs:\n%s", h.logs)
 }
 
 func TestUnknownPath(t *testing.T) {
@@ -478,5 +497,12 @@ func TestIPNeverInLogsOrResponses(t *testing.T) {
 		if strings.Contains(h.logs.String(), ip) {
 			t.Errorf("logs contain the IP:\n%s", h.logs)
 		}
+	}
+}
+
+// TestTrailingDataAfterJSON covers G31: data after the JSON value is malformed.
+func TestTrailingDataAfterJSON(t *testing.T) {
+	for _, body := range []string{validBody + ` {}`, validBody + `x`, `{}{}`} {
+		wantProblem(t, newHarness(gbDB).post(body), 400, "malformed-request", "Malformed request", "The request body is not valid JSON.")
 	}
 }

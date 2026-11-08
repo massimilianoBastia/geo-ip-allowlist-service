@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/massimilianoBastia/geo-ip-allowlist-service/internal/config"
 	"github.com/massimilianoBastia/geo-ip-allowlist-service/internal/geoipdb"
 )
 
@@ -221,5 +223,76 @@ func TestGracefulShutdownFinishesInFlightRequest(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("run did not return after the request finished")
+	}
+}
+
+// TestServerTimeouts covers G13: the fixed server timeouts.
+func TestServerTimeouts(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	srv := newServer(config.Config{ListenAddr: ":8080"}, http.NotFoundHandler(), nil, logger)
+	got := map[string]time.Duration{
+		"ReadHeaderTimeout": srv.ReadHeaderTimeout,
+		"ReadTimeout":       srv.ReadTimeout,
+		"WriteTimeout":      srv.WriteTimeout,
+		"IdleTimeout":       srv.IdleTimeout,
+	}
+	want := map[string]time.Duration{
+		"ReadHeaderTimeout": 5 * time.Second,
+		"ReadTimeout":       10 * time.Second,
+		"WriteTimeout":      10 * time.Second,
+		"IdleTimeout":       60 * time.Second,
+	}
+	for name, w := range want {
+		if got[name] != w {
+			t.Errorf("%s = %v, want %v", name, got[name], w)
+		}
+	}
+}
+
+// TestCleanStopLogsServerStopped covers G66: a clean stop returns no error and
+// logs one INFO line "server stopped".
+func TestCleanStopLogsServerStopped(t *testing.T) {
+	s := start(t, map[string]string{"GEOIP_DATABASE_PATH": testDB}, nil)
+	s.waitReady(t)
+	s.cancel()
+	if err := <-s.result; err != nil {
+		t.Fatalf("run error = %v, want nil", err)
+	}
+	n := 0
+	for _, line := range strings.Split(strings.TrimSpace(s.logs.String()), "\n") {
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("log line %q is not JSON: %v", line, err)
+		}
+		if rec["msg"] == "server stopped" && rec["level"] == "INFO" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("INFO \"server stopped\" lines = %d, want 1; logs:\n%s", n, s.logs)
+	}
+}
+
+func TestRunReturnsOnListenerFailure(t *testing.T) {
+	listener := newPipeListener()
+	_ = listener.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		result <- run(ctx, func(k string) string {
+			if k == "GEOIP_DATABASE_PATH" {
+				return testDB
+			}
+			return ""
+		}, io.Discard, deps{listener: listener})
+	}()
+	select {
+	case err := <-result:
+		if err == nil || !strings.Contains(err.Error(), "serve:") {
+			t.Fatalf("run error = %v, want serve error", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("run did not stop after listener failure with an active parent context")
 	}
 }

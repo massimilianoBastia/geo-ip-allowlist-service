@@ -209,3 +209,82 @@ func TestParseOptionalFields(t *testing.T) {
 		})
 	}
 }
+
+// TestParseNullAndEmptyOptionalFields covers G60: a JSON null is handled like
+// any other value that is not a string, and an empty requested_at is invalid.
+func TestParseNullAndEmptyOptionalFields(t *testing.T) {
+	const sessionWarn = "session_id must be a string of at most 128 characters; the value was ignored."
+	const timeWarn = "requested_at must be a valid RFC 3339 timestamp; the value was ignored."
+	tests := []struct {
+		name         string
+		extra        string
+		wantWarnings []request.Warning
+		wantIgnored  []request.IgnoredField
+	}{
+		{"null session_id", `"session_id":null`,
+			[]request.Warning{{Code: "invalid_session_id", Pointer: "/session_id", Detail: sessionWarn}},
+			[]request.IgnoredField{{Name: "session_id", JSONType: "null"}}},
+		{"null requested_at", `"requested_at":null`,
+			[]request.Warning{{Code: "invalid_requested_at", Pointer: "/requested_at", Detail: timeWarn}},
+			[]request.IgnoredField{{Name: "requested_at", JSONType: "null"}}},
+		{"empty requested_at", `"requested_at":""`,
+			[]request.Warning{{Code: "invalid_requested_at", Pointer: "/requested_at", Detail: timeWarn}},
+			[]request.IgnoredField{{Name: "requested_at", Length: 0}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := request.Parse([]byte(`{"ip_address":"81.2.69.160","allowed_countries":["GB"],` + tt.extra + `}`))
+			if err != nil {
+				t.Fatalf("Parse error = %v", err)
+			}
+			if got.SessionID != "" || got.RequestedAt != "" {
+				t.Errorf("SessionID/RequestedAt = %q/%q, want both empty", got.SessionID, got.RequestedAt)
+			}
+			if !reflect.DeepEqual(got.Warnings, tt.wantWarnings) {
+				t.Errorf("Warnings = %+v, want %+v", got.Warnings, tt.wantWarnings)
+			}
+			if !reflect.DeepEqual(got.Ignored, tt.wantIgnored) {
+				t.Errorf("Ignored = %+v, want %+v", got.Ignored, tt.wantIgnored)
+			}
+		})
+	}
+}
+
+func TestParseLargeNumbers(t *testing.T) {
+	tests := []struct {
+		name, body string
+		invalid    bool
+		ignored    int
+	}{
+		{"unknown field", `{"ip_address":"81.2.69.160","allowed_countries":["GB"],"ignored":1e400}`, false, 0},
+		{"optional fields", `{"ip_address":"81.2.69.160","allowed_countries":["GB"],"session_id":1e400,"requested_at":-1e400}`, false, 2},
+		{"required field", `{"ip_address":1e400,"allowed_countries":["GB"]}`, true, 0},
+		{"top level", `1e400`, true, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := request.Parse([]byte(tt.body))
+			if tt.invalid {
+				var invalid *request.InvalidError
+				if !errors.As(err, &invalid) {
+					t.Fatalf("error = %v, want validation error", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if req.Addr.String() != "81.2.69.160" || !reflect.DeepEqual(req.Countries, []string{"GB"}) {
+				t.Fatalf("unexpected parsed request: %+v", req)
+			}
+			if len(req.Ignored) != tt.ignored {
+				t.Fatalf("ignored fields = %v", req.Ignored)
+			}
+			for _, field := range req.Ignored {
+				if field.JSONType != "number" {
+					t.Errorf("ignored type = %q, want number", field.JSONType)
+				}
+			}
+		})
+	}
+}

@@ -75,3 +75,13 @@ func TestMetricsHeadHasNoBody(t *testing.T) {
 		t.Errorf("got %d with %d body bytes, want 200 with none", rec.Code, rec.Body.Len())
 	}
 }
+
+// TestMetricsCountMethodNotAllowedOnOperationalEndpoints covers G69: a 405 on an
+// operational endpoint counts in http_problems_total.
+func TestMetricsCountMethodNotAllowedOnOperationalEndpoints(t *testing.T) {
+	h := newHarness(gbDB)
+	h.do(http.MethodPost, "/livez", "", "")
+	h.do(http.MethodPut, "/readyz", "", "")
+
+	wantLine(t, scrape(t, h), `http_problems_total{type="method-not-allowed"} 2`)
+}

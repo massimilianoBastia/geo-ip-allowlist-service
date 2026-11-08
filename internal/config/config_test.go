@@ -118,3 +118,22 @@ func TestLoadAddsMissingSlashToProblemBaseURL(t *testing.T) {
 		t.Errorf("ProblemBaseURL = %q, want %q", got.ProblemBaseURL, "https://example.org/p/")
 	}
 }
+
+// TestLoadLogLevelOffset covers G62: slog level offsets such as info+1 are accepted.
+func TestLoadLogLevelOffset(t *testing.T) {
+	got, err := config.Load(env(map[string]string{"LOG_LEVEL": "info+1"}))
+	if err != nil {
+		t.Fatalf("Load error = %v", err)
+	}
+	if want := slog.LevelInfo + 1; got.LogLevel != want {
+		t.Errorf("LogLevel = %v, want %v", got.LogLevel, want)
+	}
+}
+
+// TestLoadSanityLowerCaseCodeIsAnError covers G62: a lower-case code in a pair is an error.
+func TestLoadSanityLowerCaseCodeIsAnError(t *testing.T) {
+	_, err := config.Load(env(map[string]string{"DATABASE_SANITY_CHECKS": "81.2.69.160=gb"}))
+	if err == nil || !strings.Contains(err.Error(), "DATABASE_SANITY_CHECKS") {
+		t.Errorf("Load error = %v, want one naming DATABASE_SANITY_CHECKS", err)
+	}
+}

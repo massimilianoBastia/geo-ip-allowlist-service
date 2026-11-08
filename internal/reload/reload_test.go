@@ -357,3 +357,34 @@ func TestFileAdaptersReadTestDatabase(t *testing.T) {
 		t.Error("Open of a missing file succeeded")
 	}
 }
+
+// lookupErrDB fails every lookup.
+type lookupErrDB struct{ fakeDB }
+
+func (lookupErrDB) Lookup(netip.Addr) (geoipdb.Record, error) {
+	return geoipdb.Record{}, errors.New("lookup failed")
+}
+
+// TestSanityLookupErrorRejects covers G65: a sanity pair fails when the lookup
+// itself returns an error, and the old data stays.
+func TestSanityLookupErrorRejects(t *testing.T) {
+	file := &fakeFile{}
+	file.set(t0, goodDB, nil)
+	r, buf := newReloader(t, file, sanity)
+	r.Check()
+
+	bad := lookupErrDB{fakeDB{info: geoipdb.Info{Type: "GeoLite2-Country", BuiltAt: builtAt(10)}, iso: "GB"}}
+	file.set(t0.Add(time.Hour), bad, nil)
+	r.Check()
+
+	recs := logged(t, buf)
+	if got := count(recs, "ERROR", "database rejected"); got != 1 {
+		t.Fatalf("rejection errors = %d, want 1", got)
+	}
+	if last := recs[len(recs)-1]; last["check"] != "sanity" {
+		t.Errorf("check = %v, want sanity", last["check"])
+	}
+	if got := builtOf(r); !got.Equal(t0) {
+		t.Errorf("built at = %v, want the old %v", got, t0)
+	}
+}

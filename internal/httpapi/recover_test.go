@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -122,5 +123,32 @@ func TestSessionOfOnePanicDoesNotLeakIntoTheNext(t *testing.T) {
 	}
 	if _, ok := recs[1]["session_id"]; ok {
 		t.Errorf("second record %v carries the session of the first", recs[1])
+	}
+}
+
+// TestPanicLogsTypeNotValue covers G61: the log has the Go type of the panic
+// value, never the value itself, which could hold personal data.
+func TestPanicLogsTypeNotValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    any
+		wantType string
+	}{
+		{"string", "boom 81.2.69.160", "string"},
+		{"error", errors.New("boom 81.2.69.160"), "*errors.errorString"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(gbDB)
+			inner := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic(tt.value) })
+			serveRecovered(h, inner)
+			recs := h.records(t)
+			if len(recs) != 1 || recs[0]["panic_type"] != tt.wantType {
+				t.Fatalf("log records = %v, want one with panic_type %q", recs, tt.wantType)
+			}
+			if strings.Contains(h.logs.String(), "81.2.69.160") || strings.Contains(h.logs.String(), "boom") {
+				t.Errorf("the panic value was logged: %s", h.logs)
+			}
+		})
 	}
 }
