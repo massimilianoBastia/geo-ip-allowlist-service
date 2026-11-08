@@ -28,4 +28,5 @@ coverage.*
 docs/ai-log/**
 !docs/ai-log/*/
 !docs/ai-log/*/prompts.md
+!docs/ai-log/*/decisions.md
 !docs/ai-log/*/session.md
