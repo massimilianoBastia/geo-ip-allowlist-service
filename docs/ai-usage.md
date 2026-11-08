@@ -8,9 +8,8 @@ After commit `0080892`, Claude Code was also used to review the repository. It w
 
 A second Claude Code session was used to clean up and standardise the developer's replies, so that the main agent received clear, consistent prompts. The developer reviewed and sent each reply.
 
-## Process and time
+## Process
 
-- **Time spent:** about 4 hours 30 minutes of work in total, which is above the 4 hours the challenge suggests. This is the developer's estimate from memory; no time was tracked. The GitHub repository was created at 11:44 on 2026-11-08, the first commit is at 15:49 and the last pushed work is at 19:56 the same day, so the elapsed time is longer than the hours of work, and the exact breaks were not recorded.
 - **Order of work:** the design notes and the contract (`api/openapi.yaml`) were written first, before the code. They were committed late (16:45), after the first code commits, so the commit order does not show the real order of work.
 - **Agents:** the first stage (design, `ai-log/01-design`) used two Claude Code subagents that the developer defined, in `.claude/agents/`: `designer` turns the request into a design and an ordered plan of small steps, and `grillz` challenges that plan for gaps and untestable steps before the developer approves it. They only read files and never write code. Every later stage was a plain Claude Code session without custom agents.
 

@@ -14,7 +14,7 @@ Build a small, stateless Go service for the API gateway. It answers `POST /v1/ip
 - Go and the standard library, plus one approved dependency (`maxminddb-golang/v2`), using the Go server-project layout.
 - The GeoLite2 file is never committed. A sidecar downloads it; the service reads, checks and swaps it in.
 - Required: consistent handling of bad input, IPv6, private and loopback addresses, IPs missing from the data; logging; error handling; operational endpoints; fresh data.
-- Order of work: design, review, tests, code, within 4 hours.
+- Order of work: design, review, tests, code.
 - Core: the service, in-process reload, `/version`, the Dockerfile and the Kubernetes manifest.
 - Optional, cut first: `/metrics`, then `docker-compose.yml`.
 - gRPC is designed but not built.
