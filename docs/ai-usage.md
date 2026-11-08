@@ -5,7 +5,7 @@ Claude Code (Claude Sonnet 5.5) was the assistant for the design, the contract, 
 ## Time
 
 - **Roughly 4.3 hours of work in this repository, estimated from memory and not tracked.** This is slightly above the 4 hours the challenge suggests. The earlier-repository design work is not counted. After the first 4 hours I made further refinements to the documentation for clarity, mainly to remove noise; they are the documentation commits at the end of the history, including the cut to a short README, one design-notes file and the OpenAPI contract.
-- The GitHub repository was created at 11:44 on 2026-11-08. The first commit is at 15:49 and the last code commit at 20:54. Documentation commits continue until 21:29. The elapsed time is longer than the hours of work, and the breaks were not recorded.
+- The GitHub repository was created at 11:44 on 2026-11-08. The first commit is at 15:49 and the last code commit at 20:54. Documentation commits continue until 21:43. The elapsed time is longer than the hours of work, and the breaks were not recorded.
 - The design was first worked out in an **earlier repository** (the design phase), before the first commit here. This repository is a second run of the same workflow. That earlier work is not counted in the 4.3 hours or in the first commit's timestamp, and its session is not published here.
 
 ## Order of work and what the commits show

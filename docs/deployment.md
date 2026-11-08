@@ -97,7 +97,7 @@ go build -ldflags "-X main.version=0.1.0" -o bin/geoip-service ./cmd/geoip-servi
 GEOIP_DATABASE_PATH=testdata/GeoIP2-Country-Test.mmdb LISTEN_ADDR=127.0.0.1:8080 ./bin/geoip-service
 ```
 
-`-X main.version=...` sets what `/version` returns (default `dev`). With the real database, set `GEOIP_DATABASE_PATH` to your own `GeoLite2-Country.mmdb`; the file is not in the repository. The step-by-step check is Workflow A in the [README](../README.md#workflow-a-run-the-go-binary).
+`-X main.version=...` sets what `/version` returns (default `dev`). With the real database, set `GEOIP_DATABASE_PATH` to your own `GeoLite2-Country.mmdb`; the file is not in the repository. The step-by-step check is Workflow A in the [README](../README.md#workflow-a-run-the-go-binary-enough-to-judge-the-service).
 
 ## Run with Docker
 
@@ -203,7 +203,7 @@ The service logs `waiting for database file` (WARN) until the sidecar has writte
 kubectl -n geoip port-forward svc/geoip-service 8080:80
 ```
 
-In another terminal, use the calls from the [README](../README.md#workflow-a-run-the-go-binary) (step A6) against `http://127.0.0.1:8080`. The IPs `81.2.69.160` and `2001:218::1` are in the **test** database only; with the real database use addresses you know the country of. Without any addresses to hand, `/readyz` returning `HTTP 200` with `"database_type":"GeoLite2-Country"` proves the real file is loaded.
+In another terminal, use the calls from the [README](../README.md#workflow-a-run-the-go-binary-enough-to-judge-the-service) (step A6) against `http://127.0.0.1:8080`. The IPs `81.2.69.160` and `2001:218::1` are in the **test** database only; with the real database use addresses you know the country of. Without any addresses to hand, `/readyz` returning `HTTP 200` with `"database_type":"GeoLite2-Country"` proves the real file is loaded.
 
 ### Test on Kubernetes without a licence key
 
@@ -229,7 +229,7 @@ kubectl -n geoip rollout status deployment/geoip-service --timeout=150s
 kubectl -n geoip port-forward svc/geoip-service 8080:80
 ```
 
-The service polls every 60 s, so allow up to a minute. Expect `successfully rolled out` and two pods `2/2`. With the port-forward running, `curl -s http://127.0.0.1:8080/readyz` gives `HTTP 200` and the calls in the [README](../README.md#workflow-a-run-the-go-binary) (A5, A6) work. The sidecar restarts now and then, because its download is refused on purpose; that is expected. Delete everything with `kubectl delete namespace geoip`.
+The service polls every 60 s, so allow up to a minute. Expect `successfully rolled out` and two pods `2/2`. With the port-forward running, `curl -s http://127.0.0.1:8080/readyz` gives `HTTP 200` and the calls in the [README](../README.md#workflow-a-run-the-go-binary-enough-to-judge-the-service) (A5, A6) work. The sidecar restarts now and then, because its download is refused on purpose; that is expected. Delete everything with `kubectl delete namespace geoip`.
 
 ### Check that the NetworkPolicy is enforced
 
